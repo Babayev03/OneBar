@@ -1,0 +1,13 @@
+# Build artifacts
+.build/
+build/
+dist/
+*.xcodeproj
+*.xcworkspace
+
+# macOS
+.DS_Store
+
+# Xcode / SwiftPM local state
+.swiftpm/
+DerivedData/
