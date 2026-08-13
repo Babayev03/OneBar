@@ -109,6 +109,20 @@ struct GeneralPane: View {
                             .frame(width: 140)
                         }
 
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Allow the display to sleep")
+                                    .font(.system(size: 14))
+                                Text("Keeps the Mac awake but lets the screen turn off.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: allowDisplaySleepBinding)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        }
+
                         Divider()
 
                         Text("This option works as long as your MacBook lid is open. It is automatically turned off if you exit OneBar, which makes it safer – impossible to forget that it's on.")
@@ -210,6 +224,16 @@ struct GeneralPane: View {
 
     private var autoOffBinding: Binding<Int> {
         Binding(get: { state.sleepAutoOffMinutes }, set: { state.sleepAutoOffMinutes = $0 })
+    }
+
+    private var allowDisplaySleepBinding: Binding<Bool> {
+        Binding(
+            get: { state.allowDisplaySleep },
+            set: { allowed in
+                state.allowDisplaySleep = allowed
+                SleepPreventionManager.shared.reapply()
+            }
+        )
     }
 
     private var cleaningBinding: Binding<Int> {

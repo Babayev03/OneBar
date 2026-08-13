@@ -9,7 +9,7 @@ import IOKit.pwr_mgt
 final class SleepPreventionManager: NSObject {
     static let shared = SleepPreventionManager()
 
-    private var assertionID: IOPMAssertionID = 0
+    private var assertionIDs: [IOPMAssertionID] = []
     private var statusItem: NSStatusItem?
     private var autoOffTimer: Timer?
     private var autoOffDate: Date?
@@ -19,25 +19,59 @@ final class SleepPreventionManager: NSObject {
 
     func start() {
         guard !isActive else { return }
-        var id = IOPMAssertionID(0)
-        let result = IOPMAssertionCreateWithName(
-            kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
-            IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            "OneBar Prevent Sleep" as CFString,
-            &id
-        )
-        if result == kIOReturnSuccess {
-            assertionID = id
-            isActive = true
-            scheduleAutoOff()
-            showStatusItem()
+        let created = createAssertions()
+        guard !created.isEmpty else { return }
+
+        assertionIDs = created
+        isActive = true
+        scheduleAutoOff()
+        showStatusItem()
+    }
+
+    /// Picks up a changed `allowDisplaySleep` without making the user toggle
+    /// Prevent Sleep off and on again.
+    func reapply() {
+        guard isActive else { return }
+        releaseAssertions()
+        let created = createAssertions()
+        guard !created.isEmpty else {
+            // Nothing is held any more, so don't keep claiming to be active.
+            stop()
+            AppState.shared.preventSleepActive = false
+            return
         }
+        assertionIDs = created
+    }
+
+    /// Preventing system sleep says nothing about the display — without the
+    /// second assertion the screen still goes dark while the Mac stays awake.
+    /// Together these are `caffeinate -di`; system-only is `caffeinate -i`.
+    private func createAssertions() -> [IOPMAssertionID] {
+        var types = [kIOPMAssertionTypePreventUserIdleSystemSleep]
+        if !AppState.shared.allowDisplaySleep {
+            types.append(kIOPMAssertionTypePreventUserIdleDisplaySleep)
+        }
+
+        return types.compactMap { type in
+            var id = IOPMAssertionID(0)
+            let result = IOPMAssertionCreateWithName(
+                type as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "OneBar Prevent Sleep" as CFString,
+                &id
+            )
+            return result == kIOReturnSuccess ? id : nil
+        }
+    }
+
+    private func releaseAssertions() {
+        for id in assertionIDs { IOPMAssertionRelease(id) }
+        assertionIDs = []
     }
 
     func stop() {
         guard isActive else { return }
-        IOPMAssertionRelease(assertionID)
-        assertionID = 0
+        releaseAssertions()
         isActive = false
         autoOffTimer?.invalidate()
         autoOffTimer = nil

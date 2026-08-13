@@ -57,6 +57,11 @@ final class AppState {
         didSet { UserDefaults.standard.set(sleepAutoOffMinutes, forKey: "sleepAutoOffMinutes") }
     }
 
+    /// Let the screen turn off while Prevent Sleep keeps the Mac itself awake.
+    var allowDisplaySleep: Bool {
+        didSet { UserDefaults.standard.set(allowDisplaySleep, forKey: "allowDisplaySleep") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -88,6 +93,7 @@ final class AppState {
             "statsInterval": 5.0,
             "cleaningDuration": 60,
             "sleepAutoOffMinutes": 0,
+            "allowDisplaySleep": false,
             "accentName": "blue"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
@@ -100,6 +106,7 @@ final class AppState {
         statsInterval = defaults.double(forKey: "statsInterval")
         cleaningDuration = defaults.integer(forKey: "cleaningDuration")
         sleepAutoOffMinutes = defaults.integer(forKey: "sleepAutoOffMinutes")
+        allowDisplaySleep = defaults.bool(forKey: "allowDisplaySleep")
         accentName = defaults.string(forKey: "accentName") ?? "blue"
     }
 }

@@ -55,6 +55,7 @@ Keyboard-driven panel (every key remappable in Preferences):
 - **Touch ID keeps working** — a fingerprint read goes straight to the Secure Enclave and never passes through the key blocker
 
 ### ☕ Prevent sleep
+- Keeps both the Mac **and the screen** awake — no screen turning off mid-task; an "Allow the display to sleep" option opts back out if you want the screen dark while the Mac keeps working
 - "Temporary & safe": auto-released on quit, optional auto-off timer, and a separate menubar cup icon while active so you can't forget it
 
 ### 🔍 Scan Text / Scan QR
@@ -88,7 +89,7 @@ Everything runs **100% on-device**. OneBar makes no network requests, ever.
 - Image limit & optional history cap
 - Ignored apps
 - Fully remappable shortcuts
-- Keyboard-cleaning duration, prevent-sleep auto-off, accent color
+- Keyboard-cleaning duration, prevent-sleep auto-off and display-sleep behavior, accent color
 
 ## License
 
