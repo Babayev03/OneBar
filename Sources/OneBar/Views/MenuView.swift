@@ -24,6 +24,7 @@ struct MenuView: View {
                 }
                 toggleRow("Keyboard Cleaning", isOn: keyboardCleaningBinding)
                 toggleRow("Prevent Sleep", isOn: preventSleepBinding)
+                toggleRow("Auto Mouse Move", isOn: mouseMoveBinding)
             }
             .padding(.vertical, 10)
 
@@ -176,6 +177,20 @@ struct MenuView: View {
                     state.keyboardCleaningActive = KeyboardCleaningManager.shared.start()
                 } else {
                     KeyboardCleaningManager.shared.stop()
+                }
+            }
+        )
+    }
+
+    private var mouseMoveBinding: Binding<Bool> {
+        Binding(
+            get: { state.mouseMoveActive },
+            set: { enabled in
+                if enabled {
+                    state.mouseMoveActive = MouseMoveService.shared.start()
+                } else {
+                    MouseMoveService.shared.stop()
+                    state.mouseMoveActive = false
                 }
             }
         )
