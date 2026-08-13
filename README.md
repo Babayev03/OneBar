@@ -51,6 +51,8 @@ Keyboard-driven panel (every key remappable in Preferences):
 
 ### 🧽 Keyboard cleaning
 - Blocks every key system-wide (yes, including `⌘Q`) behind a dimmed overlay while you wipe your keyboard — mouse-only exit plus an auto-exit countdown
+- Hardware buttons are blocked too: volume, brightness, media/playback, keyboard backlight, eject and the power button
+- **Touch ID keeps working** — a fingerprint read goes straight to the Secure Enclave and never passes through the key blocker
 
 ### ☕ Prevent sleep
 - "Temporary & safe": auto-released on quit, optional auto-off timer, and a separate menubar cup icon while active so you can't forget it

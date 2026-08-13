@@ -21,7 +21,7 @@ struct KeyboardCleaningOverlay: View {
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(.white)
 
-                Text("All keys are disabled — wipe away!")
+                Text("Keys, volume and brightness are disabled — wipe away!")
                     .font(.system(size: 16))
                     .foregroundStyle(.white.opacity(0.7))
 
