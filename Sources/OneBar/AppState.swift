@@ -62,6 +62,33 @@ final class AppState {
         didSet { UserDefaults.standard.set(allowDisplaySleep, forKey: "allowDisplaySleep") }
     }
 
+    /// Seconds of idle time Auto Mouse Move tolerates before nudging the cursor.
+    var mouseMoveInterval: Double {
+        didSet { UserDefaults.standard.set(mouseMoveInterval, forKey: "mouseMoveInterval") }
+    }
+
+    /// How far the cursor travels before being put back, in points.
+    var mouseMoveDistance: Int {
+        didSet { UserDefaults.standard.set(mouseMoveDistance, forKey: "mouseMoveDistance") }
+    }
+
+    /// Glide speed in points per second — distance divided by this is how long
+    /// the sweep takes, so long and short moves look equally smooth.
+    var mouseMoveSpeed: Double {
+        didSet { UserDefaults.standard.set(mouseMoveSpeed, forKey: "mouseMoveSpeed") }
+    }
+
+    /// Nudge only after real input has stopped, so it never fights the cursor
+    /// while the Mac is actually in use.
+    var mouseMoveOnlyWhenIdle: Bool {
+        didSet { UserDefaults.standard.set(mouseMoveOnlyWhenIdle, forKey: "mouseMoveOnlyWhenIdle") }
+    }
+
+    /// Auto Mouse Move auto-off, in minutes; 0 = never.
+    var mouseMoveAutoOffMinutes: Int {
+        didSet { UserDefaults.standard.set(mouseMoveAutoOffMinutes, forKey: "mouseMoveAutoOffMinutes") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -76,9 +103,10 @@ final class AppState {
         Self.accentChoices.first { $0.name == accentName }?.color ?? .blue
     }
 
-    // Deliberately not persisted: both reset to off on every launch.
+    // Deliberately not persisted: these all reset to off on every launch.
     var keyboardCleaningActive = false
     var preventSleepActive = false
+    var mouseMoveActive = false
 
     private init() {
         let defaults = UserDefaults.standard
@@ -94,6 +122,11 @@ final class AppState {
             "cleaningDuration": 60,
             "sleepAutoOffMinutes": 0,
             "allowDisplaySleep": false,
+            "mouseMoveInterval": 60.0,
+            "mouseMoveDistance": 250,
+            "mouseMoveSpeed": 700.0,
+            "mouseMoveOnlyWhenIdle": true,
+            "mouseMoveAutoOffMinutes": 0,
             "accentName": "blue"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
@@ -107,6 +140,13 @@ final class AppState {
         cleaningDuration = defaults.integer(forKey: "cleaningDuration")
         sleepAutoOffMinutes = defaults.integer(forKey: "sleepAutoOffMinutes")
         allowDisplaySleep = defaults.bool(forKey: "allowDisplaySleep")
+        mouseMoveInterval = defaults.double(forKey: "mouseMoveInterval")
+        // Clamped on read: the slider's ceiling came down after release, and a
+        // value stored above it would otherwise stick around unreachable.
+        mouseMoveDistance = min(defaults.integer(forKey: "mouseMoveDistance"), 500)
+        mouseMoveSpeed = defaults.double(forKey: "mouseMoveSpeed")
+        mouseMoveOnlyWhenIdle = defaults.bool(forKey: "mouseMoveOnlyWhenIdle")
+        mouseMoveAutoOffMinutes = defaults.integer(forKey: "mouseMoveAutoOffMinutes")
         accentName = defaults.string(forKey: "accentName") ?? "blue"
     }
 }

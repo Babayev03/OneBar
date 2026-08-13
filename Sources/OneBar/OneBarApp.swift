@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         SleepPreventionManager.shared.stop()
         KeyboardCleaningManager.shared.stop()
+        MouseMoveService.shared.stop()
         ClipboardManager.shared.saveNow()
     }
 }

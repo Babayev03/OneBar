@@ -7,6 +7,8 @@ struct PreferencesWindow: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             ClipboardPane()
                 .tabItem { Label("Clipboard", systemImage: "doc.on.clipboard") }
+            AutomationPane()
+                .tabItem { Label("Automation", systemImage: "cursorarrow.motionlines") }
             ShortcutsPane()
                 .tabItem { Label("Shortcuts", systemImage: "command") }
         }
