@@ -9,31 +9,45 @@ struct ShortcutsPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            GroupBox {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Clipboard History")
-                        .font(.system(size: 14, weight: .semibold))
-                        .padding(.bottom, 6)
+            ScrollView {
+                VStack(spacing: 0) {
+                    group("Global", actions: ShortcutAction.allCases.filter(\.isGlobal))
 
-                    ForEach(Array(ShortcutAction.allCases.enumerated()), id: \.element.id) { index, action in
-                        if index > 0 { Divider() }
-                        shortcutRow(action)
-                    }
+                    group("Clipboard History", actions: ShortcutAction.allCases.filter { !$0.isGlobal })
+                        .padding(.top, 12)
                 }
-                .padding(6)
+                .padding(20)
             }
 
+            // Outside the scroll view: while recording this is the only thing
+            // telling you how to get out of it, so it can't scroll away.
             Text(recordingAction == nil
-                 ? "Click a key to change it. The trash button restores the default. \"Open clipboard history\" needs at least one modifier (⌘⌥⌃⇧)."
+                 ? "Click a key to change it. The trash button restores the default. Global shortcuts need at least one modifier (⌘⌥⌃⇧)."
                  : "Press the new key combination… (Esc to cancel)")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .padding(.top, 10)
-
-            Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
         }
-        .padding(20)
         .onDisappear { stopRecording() }
+    }
+
+    private func group(_ title: String, actions: [ShortcutAction]) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.bottom, 6)
+
+                ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                    if index > 0 { Divider() }
+                    shortcutRow(action)
+                }
+            }
+            .padding(6)
+        }
     }
 
     private func shortcutRow(_ action: ShortcutAction) -> some View {

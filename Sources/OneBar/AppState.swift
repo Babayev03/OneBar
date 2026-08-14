@@ -89,6 +89,58 @@ final class AppState {
         didSet { UserDefaults.standard.set(mouseMoveAutoOffMinutes, forKey: "mouseMoveAutoOffMinutes") }
     }
 
+    /// Times the click sequence runs; 0 = until stopped.
+    var autoClickRepeatCount: Int {
+        didSet { UserDefaults.standard.set(autoClickRepeatCount, forKey: "autoClickRepeatCount") }
+    }
+
+    /// Points per second the cursor travels between nodes.
+    var autoClickTravelSpeed: Double {
+        didSet { UserDefaults.standard.set(autoClickTravelSpeed, forKey: "autoClickTravelSpeed") }
+    }
+
+    /// Radius in points that a click may land off its node's centre, so a long
+    /// run never stacks every click on one pixel.
+    var autoClickJitter: Int {
+        didSet { UserDefaults.standard.set(autoClickJitter, forKey: "autoClickJitter") }
+    }
+
+    /// Fraction each delay is randomly stretched or squeezed by, so the rhythm
+    /// isn't metronomic.
+    var autoClickVariance: Double {
+        didSet { UserDefaults.standard.set(autoClickVariance, forKey: "autoClickVariance") }
+    }
+
+    /// Bow of the travel path away from a straight line, as a fraction of the
+    /// distance; 0 moves in straight lines.
+    var autoClickCurve: Double {
+        didSet { UserDefaults.standard.set(autoClickCurve, forKey: "autoClickCurve") }
+    }
+
+    /// Characters per second a text node types at.
+    var autoClickTypingSpeed: Double {
+        didSet { UserDefaults.standard.set(autoClickTypingSpeed, forKey: "autoClickTypingSpeed") }
+    }
+
+    /// Stop the sequence the moment the cursor is taken over by hand.
+    var autoClickResistanceStop: Bool {
+        didSet { UserDefaults.standard.set(autoClickResistanceStop, forKey: "autoClickResistanceStop") }
+    }
+
+    /// Turbo clicks per second.
+    var turboClickRate: Double {
+        didSet { UserDefaults.standard.set(turboClickRate, forKey: "turboClickRate") }
+    }
+
+    var turboClickButton: ClickButton {
+        didSet { UserDefaults.standard.set(turboClickButton.rawValue, forKey: "turboClickButton") }
+    }
+
+    /// Auto Click auto-off, in minutes; 0 = never.
+    var autoClickAutoOffMinutes: Int {
+        didSet { UserDefaults.standard.set(autoClickAutoOffMinutes, forKey: "autoClickAutoOffMinutes") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -107,6 +159,10 @@ final class AppState {
     var keyboardCleaningActive = false
     var preventSleepActive = false
     var mouseMoveActive = false
+    var autoClickActive = false
+    var turboClickActive = false
+    /// Canvas is open for editing (not the same as the sequence running).
+    var autoClickEditing = false
 
     private init() {
         let defaults = UserDefaults.standard
@@ -127,6 +183,16 @@ final class AppState {
             "mouseMoveSpeed": 700.0,
             "mouseMoveOnlyWhenIdle": true,
             "mouseMoveAutoOffMinutes": 0,
+            "autoClickRepeatCount": 0,
+            "autoClickTravelSpeed": 1400.0,
+            "autoClickJitter": 2,
+            "autoClickVariance": 0.15,
+            "autoClickCurve": 0.12,
+            "autoClickTypingSpeed": 12.0,
+            "autoClickResistanceStop": true,
+            "autoClickAutoOffMinutes": 0,
+            "turboClickRate": 25.0,
+            "turboClickButton": "left",
             "accentName": "blue"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
@@ -147,6 +213,16 @@ final class AppState {
         mouseMoveSpeed = defaults.double(forKey: "mouseMoveSpeed")
         mouseMoveOnlyWhenIdle = defaults.bool(forKey: "mouseMoveOnlyWhenIdle")
         mouseMoveAutoOffMinutes = defaults.integer(forKey: "mouseMoveAutoOffMinutes")
+        autoClickRepeatCount = defaults.integer(forKey: "autoClickRepeatCount")
+        autoClickTravelSpeed = defaults.double(forKey: "autoClickTravelSpeed")
+        autoClickJitter = defaults.integer(forKey: "autoClickJitter")
+        autoClickVariance = defaults.double(forKey: "autoClickVariance")
+        autoClickCurve = defaults.double(forKey: "autoClickCurve")
+        autoClickTypingSpeed = defaults.double(forKey: "autoClickTypingSpeed")
+        autoClickResistanceStop = defaults.bool(forKey: "autoClickResistanceStop")
+        autoClickAutoOffMinutes = defaults.integer(forKey: "autoClickAutoOffMinutes")
+        turboClickRate = defaults.double(forKey: "turboClickRate")
+        turboClickButton = ClickButton(rawValue: defaults.string(forKey: "turboClickButton") ?? "") ?? .left
         accentName = defaults.string(forKey: "accentName") ?? "blue"
     }
 }

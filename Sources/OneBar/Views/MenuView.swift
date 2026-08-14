@@ -2,9 +2,13 @@ import SwiftUI
 
 struct MenuView: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     private var state: AppState { AppState.shared }
     private var stats: SystemStatsService { SystemStatsService.shared }
+    private var clicker: AutoClickService { AutoClickService.shared }
+    private var canvas: ClickCanvasController { ClickCanvasController.shared }
+    private var turbo: TurboClickService { TurboClickService.shared }
 
     @State private var appeared = false
 
@@ -27,6 +31,10 @@ struct MenuView: View {
                 toggleRow("Auto Mouse Move", isOn: mouseMoveBinding)
             }
             .padding(.vertical, 10)
+
+            autoClickRow
+
+            turboRow
 
             scanRow
 
@@ -94,6 +102,48 @@ struct MenuView: View {
             // Keep sampling in the background only for the menubar readout.
             if !state.menubarLiveStats { stats.stop() }
         }
+    }
+
+    /// Not a toggle: Auto Click opens the point canvas, and running is a
+    /// decision you make there once the points are placed.
+    private var autoClickRow: some View {
+        HStack(spacing: 8) {
+            scanButton(
+                state.autoClickEditing ? "Close Click Points" : "Click Points",
+                systemImage: "cursorarrow.click.badge.clock"
+            ) {
+                // Drop the popover first: it sits above the canvas and would
+                // otherwise hang around covering the corner you're placing into.
+                dismiss()
+                canvas.toggle()
+                if state.autoClickEditing { NSApp.activate(ignoringOtherApps: true) }
+            }
+            scanButton(
+                clicker.isRunning ? "Stop Auto Click" : "Run Auto Click",
+                systemImage: clicker.isRunning ? "stop.fill" : "play.fill"
+            ) {
+                dismiss()
+                if clicker.isRunning {
+                    clicker.stop()
+                } else {
+                    state.autoClickActive = clicker.start()
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.bottom, 10)
+    }
+
+    private var turboRow: some View {
+        scanButton(
+            turbo.isRunning ? "Stop Turbo Click" : "Turbo Click",
+            systemImage: turbo.isRunning ? "bolt.slash.fill" : "bolt.fill"
+        ) {
+            dismiss()
+            turbo.toggle()
+        }
+        .padding(.horizontal, 18)
+        .padding(.bottom, 10)
     }
 
     private var scanRow: some View {
