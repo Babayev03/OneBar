@@ -76,6 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SleepPreventionManager.shared.stop()
         KeyboardCleaningManager.shared.stop()
         MouseMoveService.shared.stop()
+        AutoClickService.shared.stop()
+        ClickCanvasController.shared.close()
         ClipboardManager.shared.saveNow()
     }
 }

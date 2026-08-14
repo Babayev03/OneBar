@@ -117,7 +117,7 @@ final class ShortcutStore {
         bindings[action] = binding
         save()
         if action == .openPanel {
-            HotkeyManager.shared.register(binding: binding)
+            HotkeyManager.shared.registerFromStore()
         }
     }
 

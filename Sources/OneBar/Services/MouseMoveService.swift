@@ -97,66 +97,24 @@ final class MouseMoveService: NSObject {
 
     // MARK: - The nudge
 
-    /// Sweeps out and back along an eased path rather than teleporting: a jump
-    /// reads as a glitch, and two moves posted in the same instant are coalesced
-    /// into no visible movement at all.
+    /// Sweeps out and back rather than teleporting: a jump reads as a glitch,
+    /// and two moves posted in the same instant are coalesced into no visible
+    /// movement at all. `CursorMotion` handles the pathing.
     private func nudge(by distance: CGFloat) {
-        guard let origin = CGEvent(source: nil)?.location else { return }
+        guard let origin = CursorMotion.location else { return }
         let target = CGPoint(x: origin.x + distance * nudgeSign, y: origin.y)
         nudgeSign *= -1
 
         glideTask = Task { @MainActor [weak self] in
-            await self?.glide(from: origin, to: target)
-            await self?.glide(from: target, to: origin)
+            let speed = AppState.shared.mouseMoveSpeed
+            // Only come back if the outward trip finished — if a hand took over
+            // mid-sweep, dragging the cursor home would be exactly the fight the
+            // abort exists to avoid.
+            if await CursorMotion.glide(from: origin, to: target, speed: speed) {
+                await CursorMotion.glide(from: target, to: origin, speed: speed)
+            }
             self?.glideTask = nil
         }
-    }
-
-    private static let frameInterval = 1.0 / 60.0
-
-    private func glide(from: CGPoint, to: CGPoint) async {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let span = hypot(to.x - from.x, to.y - from.y)
-        let steps = max(1, Int((span / AppState.shared.mouseMoveSpeed / Self.frameInterval).rounded()))
-        // One step's worth of travel, with headroom: the cursor's reported
-        // position can still be a frame behind what we last posted.
-        let tolerance = max(5, (span / Double(steps)) * 2)
-        var last = from
-
-        for step in 1...steps {
-            if Task.isCancelled { return }
-            // Our own events land exactly where we put them, so a cursor that
-            // has drifted anywhere else means a hand is on the mouse — bail out
-            // rather than fight it.
-            if let current = CGEvent(source: nil)?.location,
-               hypot(current.x - last.x, current.y - last.y) > tolerance {
-                return
-            }
-
-            let t = Self.ease(Double(step) / Double(steps))
-            let point = CGPoint(
-                x: from.x + (to.x - from.x) * t,
-                y: from.y + (to.y - from.y) * t
-            )
-            post(source, to: point)
-            last = point
-            try? await Task.sleep(for: .seconds(Self.frameInterval))
-        }
-    }
-
-    /// Ease-in-out, so the sweep accelerates away and settles instead of
-    /// starting and stopping at full speed.
-    private static func ease(_ t: Double) -> Double {
-        t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
-    }
-
-    private func post(_ source: CGEventSource?, to point: CGPoint) {
-        CGEvent(
-            mouseEventSource: source,
-            mouseType: .mouseMoved,
-            mouseCursorPosition: point,
-            mouseButton: .left
-        )?.post(tap: .cghidEventTap)
     }
 
     // MARK: - Auto-off

@@ -89,6 +89,44 @@ final class AppState {
         didSet { UserDefaults.standard.set(mouseMoveAutoOffMinutes, forKey: "mouseMoveAutoOffMinutes") }
     }
 
+    /// Times the click sequence runs; 0 = until stopped.
+    var autoClickRepeatCount: Int {
+        didSet { UserDefaults.standard.set(autoClickRepeatCount, forKey: "autoClickRepeatCount") }
+    }
+
+    /// Points per second the cursor travels between nodes.
+    var autoClickTravelSpeed: Double {
+        didSet { UserDefaults.standard.set(autoClickTravelSpeed, forKey: "autoClickTravelSpeed") }
+    }
+
+    /// Radius in points that a click may land off its node's centre, so a long
+    /// run never stacks every click on one pixel.
+    var autoClickJitter: Int {
+        didSet { UserDefaults.standard.set(autoClickJitter, forKey: "autoClickJitter") }
+    }
+
+    /// Fraction each delay is randomly stretched or squeezed by, so the rhythm
+    /// isn't metronomic.
+    var autoClickVariance: Double {
+        didSet { UserDefaults.standard.set(autoClickVariance, forKey: "autoClickVariance") }
+    }
+
+    /// Bow of the travel path away from a straight line, as a fraction of the
+    /// distance; 0 moves in straight lines.
+    var autoClickCurve: Double {
+        didSet { UserDefaults.standard.set(autoClickCurve, forKey: "autoClickCurve") }
+    }
+
+    /// Stop the sequence the moment the cursor is taken over by hand.
+    var autoClickResistanceStop: Bool {
+        didSet { UserDefaults.standard.set(autoClickResistanceStop, forKey: "autoClickResistanceStop") }
+    }
+
+    /// Auto Click auto-off, in minutes; 0 = never.
+    var autoClickAutoOffMinutes: Int {
+        didSet { UserDefaults.standard.set(autoClickAutoOffMinutes, forKey: "autoClickAutoOffMinutes") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -107,6 +145,9 @@ final class AppState {
     var keyboardCleaningActive = false
     var preventSleepActive = false
     var mouseMoveActive = false
+    var autoClickActive = false
+    /// Canvas is open for editing (not the same as the sequence running).
+    var autoClickEditing = false
 
     private init() {
         let defaults = UserDefaults.standard
@@ -127,6 +168,13 @@ final class AppState {
             "mouseMoveSpeed": 700.0,
             "mouseMoveOnlyWhenIdle": true,
             "mouseMoveAutoOffMinutes": 0,
+            "autoClickRepeatCount": 0,
+            "autoClickTravelSpeed": 1400.0,
+            "autoClickJitter": 2,
+            "autoClickVariance": 0.15,
+            "autoClickCurve": 0.12,
+            "autoClickResistanceStop": true,
+            "autoClickAutoOffMinutes": 0,
             "accentName": "blue"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
@@ -147,6 +195,13 @@ final class AppState {
         mouseMoveSpeed = defaults.double(forKey: "mouseMoveSpeed")
         mouseMoveOnlyWhenIdle = defaults.bool(forKey: "mouseMoveOnlyWhenIdle")
         mouseMoveAutoOffMinutes = defaults.integer(forKey: "mouseMoveAutoOffMinutes")
+        autoClickRepeatCount = defaults.integer(forKey: "autoClickRepeatCount")
+        autoClickTravelSpeed = defaults.double(forKey: "autoClickTravelSpeed")
+        autoClickJitter = defaults.integer(forKey: "autoClickJitter")
+        autoClickVariance = defaults.double(forKey: "autoClickVariance")
+        autoClickCurve = defaults.double(forKey: "autoClickCurve")
+        autoClickResistanceStop = defaults.bool(forKey: "autoClickResistanceStop")
+        autoClickAutoOffMinutes = defaults.integer(forKey: "autoClickAutoOffMinutes")
         accentName = defaults.string(forKey: "accentName") ?? "blue"
     }
 }

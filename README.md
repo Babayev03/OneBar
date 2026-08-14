@@ -6,8 +6,8 @@
 
 <p align="center">
   A free, open-source macOS menubar utility — clipboard history with OCR & QR superpowers,
-  system monitoring, keyboard cleaning, prevent-sleep, and auto mouse move.
-  One icon, everything at hand.
+  system monitoring, keyboard cleaning, prevent-sleep, auto mouse move, and a
+  visual auto clicker. One icon, everything at hand.
 </p>
 
 <p align="center">
@@ -66,6 +66,13 @@ Keyboard-driven panel (every key remappable in Preferences):
 - Nothing is ever **clicked or typed** — it only moves
 - Configurable interval, distance (up to 500 px) and speed, plus an auto-off timer and its own menubar icon while active
 
+### 🎯 Auto click
+- Drop **click points anywhere on screen** on a transparent canvas, drag them where they need to go, and they fire **in order** along a visible chain
+- Per point: left / right / middle, **single or double click**, and how long to wait afterwards — plus size and opacity so the markers stay out of your way
+- Moves between points along a **curved, eased path** with configurable click scatter and timing variation, so a long run isn't a metronome hitting one pixel
+- **Three ways out**, because a running clicker owns your input: **Esc** stops it instantly, grabbing the mouse stops it, and an auto-off timer stops it
+- Runs a set number of passes or loops until you stop it; your points are saved between launches
+
 ### 🔍 Scan Text / Scan QR
 - Select any region of your screen and instantly get its **text (OCR)** or **QR payload** on the clipboard
 
@@ -85,7 +92,7 @@ That builds a release binary, assembles `OneBar.app`, ad-hoc signs it, installs 
 
 macOS will ask for these on first use of the corresponding feature:
 
-- **Accessibility** — required for keyboard cleaning, auto mouse move, and pasting into other apps (System Settings → Privacy & Security → Accessibility)
+- **Accessibility** — required for keyboard cleaning, auto mouse move, auto click, and pasting into other apps (System Settings → Privacy & Security → Accessibility)
 - **Screen Recording** — required for Scan Text / Scan QR
 
 Everything runs **100% on-device**. OneBar makes no network requests, ever.
@@ -99,6 +106,7 @@ Everything runs **100% on-device**. OneBar makes no network requests, ever.
 - Fully remappable shortcuts
 - Keyboard-cleaning duration, prevent-sleep auto-off and display-sleep behavior, accent color
 - Auto mouse move interval, distance, speed, idle-awareness and auto-off
+- Auto click repeat count, travel speed, click scatter, timing variation, path curve and auto-off
 
 ## License
 
