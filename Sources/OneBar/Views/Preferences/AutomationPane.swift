@@ -72,6 +72,22 @@ struct AutomationPane: View {
 
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
+                                Text("Natural movement")
+                                    .font(.system(size: 14))
+                                Text("Curves the path and varies the length, angle and timing.")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: naturalBinding)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        }
+
+                        Divider()
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text("Only while you're away")
                                     .font(.system(size: 14))
                                 Text("Waits for real input to stop, so it never tugs the cursor mid-drag.")
@@ -348,6 +364,16 @@ struct AutomationPane: View {
 
     private var speedBinding: Binding<Double> {
         Binding(get: { state.mouseMoveSpeed }, set: { state.mouseMoveSpeed = $0 })
+    }
+
+    private var naturalBinding: Binding<Bool> {
+        Binding(
+            get: { state.mouseMoveNatural },
+            set: { value in
+                state.mouseMoveNatural = value
+                MouseMoveService.shared.reapply()
+            }
+        )
     }
 
     private var onlyWhenIdleBinding: Binding<Bool> {

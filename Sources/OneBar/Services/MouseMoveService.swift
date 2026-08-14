@@ -72,12 +72,19 @@ final class MouseMoveService: NSObject {
     private func scheduleTimer() {
         timer?.invalidate()
 
-        let interval = AppState.shared.mouseMoveInterval
-        let cadence = AppState.shared.mouseMoveOnlyWhenIdle
-            ? max(1, min(5, interval / 4))
-            : interval
+        let state = AppState.shared
+        let interval = state.mouseMoveInterval
 
-        let timer = Timer(timeInterval: cadence, repeats: true) { [weak self] _ in
+        // On a fixed schedule the interval is the only thing anyone could watch,
+        // so in natural mode the timer is one-shot and re-armed with a fresh
+        // interval each time. Idle mode already ticks faster than the interval
+        // and gates on measured idle time, so it stays repeating.
+        let oneShot = state.mouseMoveNatural && !state.mouseMoveOnlyWhenIdle
+        let cadence = state.mouseMoveOnlyWhenIdle
+            ? max(1, min(5, interval / 4))
+            : (state.mouseMoveNatural ? varied(interval) : interval)
+
+        let timer = Timer(timeInterval: cadence, repeats: !oneShot) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -86,9 +93,23 @@ final class MouseMoveService: NSObject {
 
     private func tick() {
         let state = AppState.shared
+        defer {
+            // Re-arm the one-shot schedule whether or not this tick nudged.
+            if state.mouseMoveNatural, !state.mouseMoveOnlyWhenIdle, isActive { scheduleTimer() }
+        }
+
         if glideTask != nil { return }
-        if state.mouseMoveOnlyWhenIdle, idleSeconds() < state.mouseMoveInterval { return }
+        if state.mouseMoveOnlyWhenIdle {
+            // Jittered threshold, rolled fresh each time it fires, so the gap
+            // between nudges isn't the same number over and over.
+            let threshold = state.mouseMoveNatural ? varied(state.mouseMoveInterval) : state.mouseMoveInterval
+            if idleSeconds() < threshold { return }
+        }
         nudge(by: CGFloat(state.mouseMoveDistance))
+    }
+
+    private func varied(_ value: Double) -> Double {
+        max(1, value * .random(in: 0.85...1.25))
     }
 
     private func idleSeconds() -> Double {
@@ -102,16 +123,31 @@ final class MouseMoveService: NSObject {
     /// movement at all. `CursorMotion` handles the pathing.
     private func nudge(by distance: CGFloat) {
         guard let origin = CursorMotion.location else { return }
-        let target = CGPoint(x: origin.x + distance * nudgeSign, y: origin.y)
+        let natural = AppState.shared.mouseMoveNatural
+
+        // A dead-straight horizontal sweep of a fixed length is the giveaway, so
+        // natural mode tilts the direction and varies how far it goes.
+        let travel = natural ? distance * .random(in: 0.7...1.15) : distance
+        let angle = natural ? Double.random(in: -0.45...0.45) : 0
+        let target = CursorMotion.clamp(
+            CGPoint(
+                x: origin.x + travel * nudgeSign * cos(angle),
+                y: origin.y + travel * sin(angle)
+            ),
+            onDisplayContaining: origin
+        )
         nudgeSign *= -1
 
         glideTask = Task { @MainActor [weak self] in
             let speed = AppState.shared.mouseMoveSpeed
+            // The control point is randomised per call, so the way back is a
+            // different arc from the way out rather than a retraced line.
+            let curve = natural ? 0.16 : 0
             // Only come back if the outward trip finished — if a hand took over
             // mid-sweep, dragging the cursor home would be exactly the fight the
             // abort exists to avoid.
-            if await CursorMotion.glide(from: origin, to: target, speed: speed) {
-                await CursorMotion.glide(from: target, to: origin, speed: speed)
+            if await CursorMotion.glide(from: origin, to: target, speed: speed, curve: curve) {
+                await CursorMotion.glide(from: target, to: origin, speed: speed, curve: curve)
             }
             self?.glideTask = nil
         }
