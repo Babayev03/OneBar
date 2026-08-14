@@ -9,21 +9,28 @@ struct ShortcutsPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            group("Global", actions: ShortcutAction.allCases.filter(\.isGlobal))
+            ScrollView {
+                VStack(spacing: 0) {
+                    group("Global", actions: ShortcutAction.allCases.filter(\.isGlobal))
 
-            group("Clipboard History", actions: ShortcutAction.allCases.filter { !$0.isGlobal })
-                .padding(.top, 12)
+                    group("Clipboard History", actions: ShortcutAction.allCases.filter { !$0.isGlobal })
+                        .padding(.top, 12)
+                }
+                .padding(20)
+            }
 
+            // Outside the scroll view: while recording this is the only thing
+            // telling you how to get out of it, so it can't scroll away.
             Text(recordingAction == nil
                  ? "Click a key to change it. The trash button restores the default. Global shortcuts need at least one modifier (⌘⌥⌃⇧)."
                  : "Press the new key combination… (Esc to cancel)")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .padding(.top, 10)
-
-            Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
         }
-        .padding(20)
         .onDisappear { stopRecording() }
     }
 

@@ -185,10 +185,10 @@ final class AutoClickService: NSObject {
     /// a mouse button down with nothing to release it.
     private func slide(from start: CGPoint, to end: CGPoint, duration: Double, button: ClickButton) async {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let (downType, upType, cgButton) = eventTypes(for: button)
-        let dragType = dragEventType(for: button)
+        let (downType, upType, cgButton) = MouseEvents.types(for: button)
+        let dragType = MouseEvents.dragType(for: button)
 
-        post(source, type: downType, at: start, button: cgButton)
+        MouseEvents.post(source, type: downType, at: start, button: cgButton)
         // Let the press land before anything moves: drag targets commonly need
         // to see the button held at the origin first.
         try? await Task.sleep(for: .milliseconds(40))
@@ -203,11 +203,11 @@ final class AutoClickService: NSObject {
                 x: start.x + (end.x - start.x) * eased,
                 y: start.y + (end.y - start.y) * eased
             )
-            post(source, type: dragType, at: last, button: cgButton)
+            MouseEvents.post(source, type: dragType, at: last, button: cgButton)
             try? await Task.sleep(for: .seconds(CursorMotion.frameInterval))
         }
 
-        post(source, type: upType, at: last, button: cgButton)
+        MouseEvents.post(source, type: upType, at: last, button: cgButton)
     }
 
     // MARK: - Scrolling
@@ -250,55 +250,18 @@ final class AutoClickService: NSObject {
         }
     }
 
-    private func post(_ source: CGEventSource?, type: CGEventType, at point: CGPoint, button: CGMouseButton) {
-        CGEvent(
-            mouseEventSource: source,
-            mouseType: type,
-            mouseCursorPosition: point,
-            mouseButton: button
-        )?.post(tap: .cghidEventTap)
-    }
-
-    private func dragEventType(for button: ClickButton) -> CGEventType {
-        switch button {
-        case .left: return .leftMouseDragged
-        case .right: return .rightMouseDragged
-        case .middle: return .otherMouseDragged
-        }
-    }
-
     private func click(at point: CGPoint, button: ClickButton, count: Int) async {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let (downType, upType, cgButton) = eventTypes(for: button)
+        let (downType, upType, cgButton) = MouseEvents.types(for: button)
 
         for press in 1...max(1, count) {
-            guard let event = CGEvent(
-                mouseEventSource: source,
-                mouseType: downType,
-                mouseCursorPosition: point,
-                mouseButton: cgButton
-            ) else { return }
-
-            // What makes a double click a double click is this field, not the gap
-            // between two events — post two plain clicks and apps read two singles.
-            event.setIntegerValueField(.mouseEventClickState, value: Int64(press))
-            event.post(tap: .cghidEventTap)
-
+            MouseEvents.post(source, type: downType, at: point, button: cgButton, clickState: Int64(press))
             // Hold briefly before releasing: a zero-length press is dropped by
             // some controls, which watch for the button being held at all.
             try? await Task.sleep(for: .milliseconds(20))
-            event.type = upType
-            event.post(tap: .cghidEventTap)
+            MouseEvents.post(source, type: upType, at: point, button: cgButton, clickState: Int64(press))
 
             if press < count { try? await Task.sleep(for: .milliseconds(60)) }
-        }
-    }
-
-    private func eventTypes(for button: ClickButton) -> (CGEventType, CGEventType, CGMouseButton) {
-        switch button {
-        case .left: return (.leftMouseDown, .leftMouseUp, .left)
-        case .right: return (.rightMouseDown, .rightMouseUp, .right)
-        case .middle: return (.otherMouseDown, .otherMouseUp, .center)
         }
     }
 

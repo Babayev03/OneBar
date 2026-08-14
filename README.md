@@ -7,7 +7,7 @@
 <p align="center">
   A free, open-source macOS menubar utility — clipboard history with OCR & QR superpowers,
   system monitoring, keyboard cleaning, prevent-sleep, auto mouse move, and a
-  visual auto clicker. One icon, everything at hand.
+  visual auto clicker with turbo mode. One icon, everything at hand.
 </p>
 
 <p align="center">
@@ -74,6 +74,12 @@ Keyboard-driven panel (every key remappable in Preferences):
 - **Three ways out**, because a running clicker owns your input: **Esc** stops it instantly, grabbing the mouse stops it, and an auto-off timer stops it
 - Runs a set number of passes or loops until you stop it; your points are saved between launches
 - Open the canvas from the menubar or a **global shortcut** (`⌥⌘C` by default, rebindable)
+- Save setups to the **layout library** and switch between them in a click
+
+### ⚡ Turbo click
+- Clicks wherever the pointer already is — no points involved. Toggle it from anywhere with a **global shortcut** (`⌥⌘T` by default)
+- Configurable rate and button, capped at 100 clicks/second — well below the rate that locks macOS up
+- Same **Esc** kill switch, and its own menubar icon while running
 
 ### 🔍 Scan Text / Scan QR
 - Select any region of your screen and instantly get its **text (OCR)** or **QR payload** on the clipboard
@@ -105,10 +111,11 @@ Everything runs **100% on-device**. OneBar makes no network requests, ever.
 - Live menubar stats, update frequency, ring thresholds
 - Image limit & optional history cap
 - Ignored apps
-- Fully remappable shortcuts, including global ones for the clipboard panel (`⌘H`) and the Auto Click canvas (`⌥⌘C`)
+- Fully remappable shortcuts, including global ones for the clipboard panel (`⌘H`), the Auto Click canvas (`⌥⌘C`) and turbo click (`⌥⌘T`)
 - Keyboard-cleaning duration, prevent-sleep auto-off and display-sleep behavior, accent color
 - Auto mouse move interval, distance, speed, idle-awareness and auto-off
-- Auto click repeat count, travel speed, click scatter, timing variation, path curve and auto-off
+- Auto click repeat count, travel speed, typing speed, click scatter, timing variation, path curve and auto-off
+- Turbo click rate and button
 
 ## License
 

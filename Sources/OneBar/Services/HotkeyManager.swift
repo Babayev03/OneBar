@@ -8,6 +8,7 @@ enum GlobalHotkey: UInt32 {
     case openPanel = 1
     case autoClickStop = 2
     case openClickPoints = 3
+    case turboClick = 4
 }
 
 /// Registers global hotkeys via Carbon — system-wide with no special
@@ -32,6 +33,9 @@ final class HotkeyManager {
             // Nothing activated us — without this the canvas draws but its
             // controls stay dead behind whatever app is frontmost.
             if AppState.shared.autoClickEditing { NSApp.activate(ignoringOtherApps: true) }
+        }
+        register(.turboClick, binding: ShortcutStore.shared.binding(for: .turboClick)) {
+            TurboClickService.shared.toggle()
         }
     }
 

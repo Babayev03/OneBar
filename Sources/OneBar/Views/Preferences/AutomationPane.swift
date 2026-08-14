@@ -4,6 +4,7 @@ struct AutomationPane: View {
     private var state: AppState { AppState.shared }
     private var clicker: AutoClickService { AutoClickService.shared }
     private var sequence: ClickSequence { ClickSequence.shared }
+    private var turbo: TurboClickService { TurboClickService.shared }
 
     private var pointSummary: String {
         let count = sequence.nodes.count
@@ -261,6 +262,52 @@ struct AutomationPane: View {
                     }
                     .padding(6)
                 }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Turbo Click")
+                                .font(.system(size: 14))
+                            Spacer()
+                            Button(turbo.isRunning ? "Stop" : "Start") { turbo.toggle() }
+                        }
+
+                        Divider()
+
+                        HStack {
+                            Text("Clicks per second")
+                                .font(.system(size: 14))
+                            Spacer()
+                            Text("\(Int(state.turboClickRate))")
+                                .font(.system(size: 13).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, alignment: .trailing)
+                            Slider(value: turboRateBinding, in: 1...TurboClickService.maxRate)
+                                .frame(width: 140)
+                        }
+
+                        Divider()
+
+                        HStack {
+                            Text("Button")
+                                .font(.system(size: 14))
+                            Spacer()
+                            Picker("", selection: turboButtonBinding) {
+                                ForEach(ClickButton.allCases) { Text($0.title).tag($0) }
+                            }
+                            .labelsHidden()
+                            .frame(width: 140)
+                        }
+
+                        Divider()
+
+                        Text("Clicks wherever the pointer already is — no points involved. Toggle it from anywhere with its global shortcut (Preferences → Shortcuts), and press Esc to stop. Capped at \(Int(TurboClickService.maxRate)) clicks a second, well below the rate that locks macOS up.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(6)
+                }
             }
             .padding(20)
         }
@@ -338,6 +385,17 @@ struct AutomationPane: View {
 
     private var curveBinding: Binding<Double> {
         Binding(get: { state.autoClickCurve }, set: { state.autoClickCurve = $0 })
+    }
+
+    private var turboRateBinding: Binding<Double> {
+        Binding(
+            get: { state.turboClickRate },
+            set: { state.turboClickRate = $0.rounded() }
+        )
+    }
+
+    private var turboButtonBinding: Binding<ClickButton> {
+        Binding(get: { state.turboClickButton }, set: { state.turboClickButton = $0 })
     }
 
     private var typingSpeedBinding: Binding<Double> {

@@ -8,6 +8,7 @@ struct MenuView: View {
     private var stats: SystemStatsService { SystemStatsService.shared }
     private var clicker: AutoClickService { AutoClickService.shared }
     private var canvas: ClickCanvasController { ClickCanvasController.shared }
+    private var turbo: TurboClickService { TurboClickService.shared }
 
     @State private var appeared = false
 
@@ -32,6 +33,8 @@ struct MenuView: View {
             .padding(.vertical, 10)
 
             autoClickRow
+
+            turboRow
 
             scanRow
 
@@ -126,6 +129,18 @@ struct MenuView: View {
                     state.autoClickActive = clicker.start()
                 }
             }
+        }
+        .padding(.horizontal, 18)
+        .padding(.bottom, 10)
+    }
+
+    private var turboRow: some View {
+        scanButton(
+            turbo.isRunning ? "Stop Turbo Click" : "Turbo Click",
+            systemImage: turbo.isRunning ? "bolt.slash.fill" : "bolt.fill"
+        ) {
+            dismiss()
+            turbo.toggle()
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 10)

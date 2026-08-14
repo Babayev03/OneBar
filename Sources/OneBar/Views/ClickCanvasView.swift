@@ -18,7 +18,13 @@ struct ClickCanvasView: View {
         var translation: CGSize
     }
 
+    private var layouts: ClickLayoutStore { ClickLayoutStore.shared }
+
     @State private var drag: Drag?
+    @State private var isNamingLayout = false
+    @State private var layoutName = ""
+
+    private var turbo: TurboClickService { TurboClickService.shared }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -205,6 +211,8 @@ struct ClickCanvasView: View {
             Button("Clear All") { sequence.removeAll() }
                 .disabled(sequence.nodes.isEmpty || clicker.isRunning)
 
+            layoutMenu
+
             Divider().frame(height: 16)
 
             Text(clicker.isRunning ? "Press Esc to stop" : "Click anywhere to add a point")
@@ -219,6 +227,44 @@ struct ClickCanvasView: View {
         .liquidGlass(in: Capsule())
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.top, 44)
+        .alert("Save layout", isPresented: $isNamingLayout) {
+            TextField("Name", text: $layoutName)
+            Button("Save") {
+                layouts.save(layoutName, nodes: sequence.nodes)
+                layoutName = ""
+            }
+            Button("Cancel", role: .cancel) { layoutName = "" }
+        } message: {
+            Text("Saving over an existing name replaces it.")
+        }
+    }
+
+    private var layoutMenu: some View {
+        Menu {
+            Button("Save Current…") { isNamingLayout = true }
+                .disabled(sequence.nodes.isEmpty)
+
+            if !layouts.layouts.isEmpty {
+                Divider()
+                ForEach(layouts.layouts) { layout in
+                    Button("\(layout.name)  (\(layout.nodes.count))") {
+                        sequence.nodes = layout.nodes
+                        canvas.selection = nil
+                    }
+                }
+                Divider()
+                Menu("Delete") {
+                    ForEach(layouts.layouts) { layout in
+                        Button(layout.name) { layouts.delete(layout.id) }
+                    }
+                }
+            }
+        } label: {
+            Label("Layouts", systemImage: "square.stack")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(clicker.isRunning)
     }
 
     // MARK: - Inspector

@@ -127,6 +127,15 @@ final class AppState {
         didSet { UserDefaults.standard.set(autoClickResistanceStop, forKey: "autoClickResistanceStop") }
     }
 
+    /// Turbo clicks per second.
+    var turboClickRate: Double {
+        didSet { UserDefaults.standard.set(turboClickRate, forKey: "turboClickRate") }
+    }
+
+    var turboClickButton: ClickButton {
+        didSet { UserDefaults.standard.set(turboClickButton.rawValue, forKey: "turboClickButton") }
+    }
+
     /// Auto Click auto-off, in minutes; 0 = never.
     var autoClickAutoOffMinutes: Int {
         didSet { UserDefaults.standard.set(autoClickAutoOffMinutes, forKey: "autoClickAutoOffMinutes") }
@@ -151,6 +160,7 @@ final class AppState {
     var preventSleepActive = false
     var mouseMoveActive = false
     var autoClickActive = false
+    var turboClickActive = false
     /// Canvas is open for editing (not the same as the sequence running).
     var autoClickEditing = false
 
@@ -181,6 +191,8 @@ final class AppState {
             "autoClickTypingSpeed": 12.0,
             "autoClickResistanceStop": true,
             "autoClickAutoOffMinutes": 0,
+            "turboClickRate": 25.0,
+            "turboClickButton": "left",
             "accentName": "blue"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
@@ -209,6 +221,8 @@ final class AppState {
         autoClickTypingSpeed = defaults.double(forKey: "autoClickTypingSpeed")
         autoClickResistanceStop = defaults.bool(forKey: "autoClickResistanceStop")
         autoClickAutoOffMinutes = defaults.integer(forKey: "autoClickAutoOffMinutes")
+        turboClickRate = defaults.double(forKey: "turboClickRate")
+        turboClickButton = ClickButton(rawValue: defaults.string(forKey: "turboClickButton") ?? "") ?? .left
         accentName = defaults.string(forKey: "accentName") ?? "blue"
     }
 }

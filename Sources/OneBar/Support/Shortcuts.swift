@@ -47,6 +47,7 @@ struct KeyBinding: Codable, Equatable {
 enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case openPanel
     case openClickPoints
+    case turboClick
     case search
     case moveUp
     case moveDown
@@ -61,6 +62,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .openPanel: return "Open clipboard history"
         case .openClickPoints: return "Open Auto Click points"
+        case .turboClick: return "Turbo click on/off"
         case .search: return "Search clipboard history"
         case .moveUp: return "Move up"
         case .moveDown: return "Move down"
@@ -75,6 +77,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .openPanel: return KeyBinding(keyCode: 4, modifiers: [.command])   // ⌘H
         case .openClickPoints: return KeyBinding(keyCode: 8, modifiers: [.command, .option]) // ⌥⌘C
+        case .turboClick: return KeyBinding(keyCode: 17, modifiers: [.command, .option]) // ⌥⌘T
         case .search: return KeyBinding(keyCode: 1)                             // S
         case .moveUp: return KeyBinding(keyCode: 126)                           // ↑
         case .moveDown: return KeyBinding(keyCode: 125)                         // ↓
@@ -90,7 +93,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     /// is only ever handed a combination.
     var isGlobal: Bool { Self.globals.contains(self) }
 
-    static let globals: Set<ShortcutAction> = [.openPanel, .openClickPoints]
+    static let globals: Set<ShortcutAction> = [.openPanel, .openClickPoints, .turboClick]
 }
 
 @MainActor
