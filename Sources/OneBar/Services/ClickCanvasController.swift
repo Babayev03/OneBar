@@ -19,6 +19,9 @@ extension NSScreen {
 /// canvas toolbar's buttons and keyboard shortcuts inert.
 private final class CanvasWindow: NSWindow {
     override var canBecomeKey: Bool { true }
+    /// Text nodes put a real text field in the inspector, and a window that
+    /// can't become main never gives it a working focus ring or caret.
+    override var canBecomeMain: Bool { true }
 }
 
 /// Editing state that has to be shared across the per-screen canvas windows —

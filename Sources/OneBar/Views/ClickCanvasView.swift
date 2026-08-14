@@ -10,9 +10,11 @@ struct ClickCanvasView: View {
     private var sequence: ClickSequence { ClickSequence.shared }
     private var canvas: ClickCanvasModel { ClickCanvasModel.shared }
     private var clicker: AutoClickService { AutoClickService.shared }
+    private var accent: Color { AppState.shared.accentColor }
 
     private struct Drag: Equatable {
         var id: UUID
+        var isEnd: Bool
         var translation: CGSize
     }
 
@@ -62,7 +64,7 @@ struct ClickCanvasView: View {
             for point in points.dropFirst() { path.addLine(to: point) }
         }
         .stroke(
-            Color.accentColor.opacity(0.45),
+            accent.opacity(0.45),
             style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [5, 5])
         )
         .allowsHitTesting(false)
@@ -72,8 +74,56 @@ struct ClickCanvasView: View {
 
     private var nodes: some View {
         ForEach(Array(sequence.nodes.enumerated()), id: \.element.id) { index, node in
-            nodeView(node, index: index + 1)
+            Group {
+                if node.kind == .slide {
+                    slideTrack(node)
+                    slideEndHandle(node)
+                }
+                nodeView(node, index: index + 1)
+            }
         }
+    }
+
+    /// The line a slide travels along, drawn solid so it reads differently from
+    /// the dashed chain that orders the sequence.
+    private func slideTrack(_ node: ClickNode) -> some View {
+        Path { path in
+            path.move(to: displayPosition(for: node))
+            path.addLine(to: displayEndPosition(for: node))
+        }
+        .stroke(accent.opacity(0.7), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        .opacity(node.opacity)
+        .allowsHitTesting(false)
+    }
+
+    private func slideEndHandle(_ node: ClickNode) -> some View {
+        let size = max(14, node.radius * 1.2)
+        return ZStack {
+            Circle().fill(accent.opacity(0.18))
+            Circle().strokeBorder(accent, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+            Image(systemName: "arrow.down.right")
+                .font(.system(size: size * 0.4, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+        .opacity(node.opacity)
+        .position(displayEndPosition(for: node))
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    guard !clicker.isRunning else { return }
+                    canvas.selection = node.id
+                    drag = Drag(id: node.id, isEnd: true, translation: value.translation)
+                }
+                .onEnded { value in
+                    guard !clicker.isRunning else { return }
+                    drag = nil
+                    var position = local(for: node.slideEnd)
+                    position.x += value.translation.width
+                    position.y += value.translation.height
+                    sequence.moveSlideEnd(node.id, to: eventPoint(from: position))
+                }
+        )
     }
 
     private func nodeView(_ node: ClickNode, index: Int) -> some View {
@@ -83,15 +133,24 @@ struct ClickCanvasView: View {
 
         return ZStack {
             Circle()
-                .fill(Color.accentColor.opacity(isFiring ? 0.55 : 0.22))
+                .fill(accent.opacity(isFiring ? 0.55 : 0.22))
             Circle()
                 .strokeBorder(
-                    isSelected ? Color.white : Color.accentColor,
+                    isSelected ? Color.white : accent,
                     lineWidth: isSelected ? 2.5 : 1.5
                 )
             Text("\(index)")
                 .font(.system(size: max(10, node.radius * 0.7), weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
+
+            if node.kind != .click {
+                Image(systemName: node.kind.symbol)
+                    .font(.system(size: max(7, node.radius * 0.42), weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(3)
+                    .background(accent, in: Circle())
+                    .offset(x: node.radius * 0.75, y: node.radius * 0.75)
+            }
         }
         .frame(width: size, height: size)
         .opacity(node.opacity)
@@ -103,7 +162,7 @@ struct ClickCanvasView: View {
                 .onChanged { value in
                     guard !clicker.isRunning else { return }
                     canvas.selection = node.id
-                    drag = Drag(id: node.id, translation: value.translation)
+                    drag = Drag(id: node.id, isEnd: false, translation: value.translation)
                 }
                 .onEnded { value in
                     guard !clicker.isRunning else { return }
@@ -135,7 +194,7 @@ struct ClickCanvasView: View {
                     systemImage: clicker.isRunning ? "stop.fill" : "play.fill"
                 )
             }
-            .keyboardShortcut(.return, modifiers: [])
+            .keyboardShortcut(.return, modifiers: .command)
 
             Divider().frame(height: 16)
 
@@ -171,9 +230,14 @@ struct ClickCanvasView: View {
             let node = sequence.nodes[index]
 
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Point \(index + 1)")
-                        .font(.headline)
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Point \(index + 1)")
+                            .font(.headline)
+                        Text(node.summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Button {
                         canvas.selection = nil
@@ -184,16 +248,67 @@ struct ClickCanvasView: View {
                     .buttonStyle(.borderless)
                 }
 
-                Picker("Button", selection: binding(id, \.button, default: .left)) {
-                    ForEach(ClickButton.allCases) { Text($0.title).tag($0) }
+                Picker("Mode", selection: kindBinding(id)) {
+                    ForEach(NodeKind.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
 
-                Picker("Clicks", selection: binding(id, \.clickCount, default: 1)) {
-                    Text("Single").tag(1)
-                    Text("Double").tag(2)
+                switch node.kind {
+                case .click:
+                    Picker("Button", selection: binding(id, \.button, default: .left)) {
+                        ForEach(ClickButton.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("Clicks", selection: binding(id, \.clickCount, default: 1)) {
+                        Text("Single").tag(1)
+                        Text("Double").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+
+                case .text:
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Types at this point")
+                            .font(.callout)
+                        TextField("Text to type", text: binding(id, \.text, default: ""), axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(1...5)
+                    }
+
+                case .slide:
+                    Picker("Button", selection: binding(id, \.button, default: .left)) {
+                        ForEach(ClickButton.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    labelled("Drag time", value: String(format: "%.2fs", node.slideDuration)) {
+                        Slider(value: binding(id, \.slideDuration, default: 0.6), in: 0.1...5)
+                    }
+
+                    Text("Drag the dashed handle to set where the slide releases.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                case .scroll:
+                    Picker("Direction", selection: binding(id, \.scrollDirection, default: .down)) {
+                        ForEach(ScrollDirection.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    labelled("Distance", value: "\(Int(node.scrollDistance)) px") {
+                        Slider(value: binding(id, \.scrollDistance, default: 400), in: 50...3000)
+                    }
+
+                    labelled("Over", value: String(format: "%.2fs", node.scrollDuration)) {
+                        Slider(value: binding(id, \.scrollDuration, default: 0.4), in: 0.05...3)
+                    }
+
+                    Text("Scrolls whatever sits under this point. Nothing is pressed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .pickerStyle(.segmented)
 
                 labelled("Wait after", value: String(format: "%.2fs", node.delay)) {
                     Slider(value: binding(id, \.delay, default: 0.5), in: 0.05...10)
@@ -230,6 +345,21 @@ struct ClickCanvasView: View {
         }
     }
 
+    private func kindBinding(_ id: UUID) -> Binding<NodeKind> {
+        Binding(
+            get: { ClickSequence.shared.nodes.first { $0.id == id }?.kind ?? .click },
+            set: { newValue in
+                guard let index = ClickSequence.shared.nodes.firstIndex(where: { $0.id == id }) else { return }
+                // Pin the endpoint on the way into slide mode: until it's a real
+                // value the handle has nothing to write back to.
+                if newValue == .slide, ClickSequence.shared.nodes[index].slideTo == nil {
+                    ClickSequence.shared.nodes[index].slideTo = ClickSequence.shared.nodes[index].slideEnd
+                }
+                ClickSequence.shared.nodes[index].kind = newValue
+            }
+        )
+    }
+
     /// Resolved by id, not index: a binding outlives the render that made it,
     /// and deleting a node would leave a stale index pointing off the end.
     private func binding<Value>(
@@ -264,7 +394,18 @@ struct ClickCanvasView: View {
 
     private func displayPosition(for node: ClickNode) -> CGPoint {
         var position = local(for: node.point)
+        if let drag, drag.id == node.id, !drag.isEnd {
+            position.x += drag.translation.width
+            position.y += drag.translation.height
+        }
+        return position
+    }
+
+    private func displayEndPosition(for node: ClickNode) -> CGPoint {
+        var position = local(for: node.slideEnd)
         if let drag, drag.id == node.id {
+            // Dragging the start carries the whole gesture; dragging the end
+            // just stretches it.
             position.x += drag.translation.width
             position.y += drag.translation.height
         }

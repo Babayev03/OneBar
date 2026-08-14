@@ -7,6 +7,7 @@ import Foundation
 enum GlobalHotkey: UInt32 {
     case openPanel = 1
     case autoClickStop = 2
+    case openClickPoints = 3
 }
 
 /// Registers global hotkeys via Carbon — system-wide with no special
@@ -25,6 +26,12 @@ final class HotkeyManager {
     func registerFromStore() {
         register(.openPanel, binding: ShortcutStore.shared.binding(for: .openPanel)) {
             ClipboardPanelController.shared.toggle()
+        }
+        register(.openClickPoints, binding: ShortcutStore.shared.binding(for: .openClickPoints)) {
+            ClickCanvasController.shared.toggle()
+            // Nothing activated us — without this the canvas draws but its
+            // controls stay dead behind whatever app is frontmost.
+            if AppState.shared.autoClickEditing { NSApp.activate(ignoringOtherApps: true) }
         }
     }
 

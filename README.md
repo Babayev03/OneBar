@@ -68,10 +68,12 @@ Keyboard-driven panel (every key remappable in Preferences):
 
 ### 🎯 Auto click
 - Drop **click points anywhere on screen** on a transparent canvas, drag them where they need to go, and they fire **in order** along a visible chain
-- Per point: left / right / middle, **single or double click**, and how long to wait afterwards — plus size and opacity so the markers stay out of your way
+- Four point types: **click** (left/right/middle, single or double), **text** (types a stored string at human speed, any keyboard layout), **slide** (press-drag-release, so it really moves files and sliders) and **scroll**
+- Per point: how long to wait afterwards, plus size and opacity so the markers stay out of your way
 - Moves between points along a **curved, eased path** with configurable click scatter and timing variation, so a long run isn't a metronome hitting one pixel
 - **Three ways out**, because a running clicker owns your input: **Esc** stops it instantly, grabbing the mouse stops it, and an auto-off timer stops it
 - Runs a set number of passes or loops until you stop it; your points are saved between launches
+- Open the canvas from the menubar or a **global shortcut** (`⌥⌘C` by default, rebindable)
 
 ### 🔍 Scan Text / Scan QR
 - Select any region of your screen and instantly get its **text (OCR)** or **QR payload** on the clipboard
@@ -103,7 +105,7 @@ Everything runs **100% on-device**. OneBar makes no network requests, ever.
 - Live menubar stats, update frequency, ring thresholds
 - Image limit & optional history cap
 - Ignored apps
-- Fully remappable shortcuts
+- Fully remappable shortcuts, including global ones for the clipboard panel (`⌘H`) and the Auto Click canvas (`⌥⌘C`)
 - Keyboard-cleaning duration, prevent-sleep auto-off and display-sleep behavior, accent color
 - Auto mouse move interval, distance, speed, idle-awareness and auto-off
 - Auto click repeat count, travel speed, click scatter, timing variation, path curve and auto-off

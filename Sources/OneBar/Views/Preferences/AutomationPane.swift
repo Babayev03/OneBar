@@ -168,6 +168,22 @@ struct AutomationPane: View {
                         Divider()
 
                         HStack {
+                            Text("Typing speed")
+                                .font(.system(size: 14))
+                            Spacer()
+                            Picker("", selection: typingSpeedBinding) {
+                                Text("Slow").tag(6.0)
+                                Text("Natural").tag(12.0)
+                                Text("Fast").tag(25.0)
+                                Text("Instant").tag(200.0)
+                            }
+                            .labelsHidden()
+                            .frame(width: 140)
+                        }
+
+                        Divider()
+
+                        HStack {
                             Text("Click scatter")
                                 .font(.system(size: 14))
                             Spacer()
@@ -238,7 +254,7 @@ struct AutomationPane: View {
 
                         Divider()
 
-                        Text("Open the canvas, click anywhere to drop a point, and drag points where you need them — they fire in order. Press Esc at any time to stop a run. Requires the Accessibility permission, and stops when you quit OneBar.")
+                        Text("Open the canvas, click anywhere to drop a point, and drag points where you need them — they fire in order. Each point can click, type a stored string, drag from one place to another, or scroll. Press Esc at any time to stop a run. Requires the Accessibility permission, and stops when you quit OneBar.")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -322,6 +338,10 @@ struct AutomationPane: View {
 
     private var curveBinding: Binding<Double> {
         Binding(get: { state.autoClickCurve }, set: { state.autoClickCurve = $0 })
+    }
+
+    private var typingSpeedBinding: Binding<Double> {
+        Binding(get: { state.autoClickTypingSpeed }, set: { state.autoClickTypingSpeed = $0 })
     }
 
     private var resistanceBinding: Binding<Bool> {

@@ -117,6 +117,11 @@ final class AppState {
         didSet { UserDefaults.standard.set(autoClickCurve, forKey: "autoClickCurve") }
     }
 
+    /// Characters per second a text node types at.
+    var autoClickTypingSpeed: Double {
+        didSet { UserDefaults.standard.set(autoClickTypingSpeed, forKey: "autoClickTypingSpeed") }
+    }
+
     /// Stop the sequence the moment the cursor is taken over by hand.
     var autoClickResistanceStop: Bool {
         didSet { UserDefaults.standard.set(autoClickResistanceStop, forKey: "autoClickResistanceStop") }
@@ -173,6 +178,7 @@ final class AppState {
             "autoClickJitter": 2,
             "autoClickVariance": 0.15,
             "autoClickCurve": 0.12,
+            "autoClickTypingSpeed": 12.0,
             "autoClickResistanceStop": true,
             "autoClickAutoOffMinutes": 0,
             "accentName": "blue"
@@ -200,6 +206,7 @@ final class AppState {
         autoClickJitter = defaults.integer(forKey: "autoClickJitter")
         autoClickVariance = defaults.double(forKey: "autoClickVariance")
         autoClickCurve = defaults.double(forKey: "autoClickCurve")
+        autoClickTypingSpeed = defaults.double(forKey: "autoClickTypingSpeed")
         autoClickResistanceStop = defaults.bool(forKey: "autoClickResistanceStop")
         autoClickAutoOffMinutes = defaults.integer(forKey: "autoClickAutoOffMinutes")
         accentName = defaults.string(forKey: "accentName") ?? "blue"

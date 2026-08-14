@@ -46,6 +46,7 @@ struct KeyBinding: Codable, Equatable {
 
 enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case openPanel
+    case openClickPoints
     case search
     case moveUp
     case moveDown
@@ -59,6 +60,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .openPanel: return "Open clipboard history"
+        case .openClickPoints: return "Open Auto Click points"
         case .search: return "Search clipboard history"
         case .moveUp: return "Move up"
         case .moveDown: return "Move down"
@@ -72,6 +74,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     var defaultBinding: KeyBinding {
         switch self {
         case .openPanel: return KeyBinding(keyCode: 4, modifiers: [.command])   // ⌘H
+        case .openClickPoints: return KeyBinding(keyCode: 8, modifiers: [.command, .option]) // ⌥⌘C
         case .search: return KeyBinding(keyCode: 1)                             // S
         case .moveUp: return KeyBinding(keyCode: 126)                           // ↑
         case .moveDown: return KeyBinding(keyCode: 125)                         // ↓
@@ -83,7 +86,11 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     }
 
     /// Global shortcuts need at least one modifier; in-panel keys may be bare.
-    var isGlobal: Bool { self == .openPanel }
+    /// A bare global key would be swallowed system-wide, so Carbon registration
+    /// is only ever handed a combination.
+    var isGlobal: Bool { Self.globals.contains(self) }
+
+    static let globals: Set<ShortcutAction> = [.openPanel, .openClickPoints]
 }
 
 @MainActor
@@ -116,7 +123,7 @@ final class ShortcutStore {
     func set(_ binding: KeyBinding, for action: ShortcutAction) {
         bindings[action] = binding
         save()
-        if action == .openPanel {
+        if action.isGlobal {
             HotkeyManager.shared.registerFromStore()
         }
     }

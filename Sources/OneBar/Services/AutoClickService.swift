@@ -120,8 +120,151 @@ final class AutoClickService: NSObject {
         if !arrived, state.autoClickResistanceStop { return false }
         if Task.isCancelled { return false }
 
-        await click(at: target, button: node.button, count: node.clickCount)
+        switch node.kind {
+        case .click:
+            await click(at: target, button: node.button, count: node.clickCount)
+        case .text:
+            // Click first: text has to land somewhere, and the point is what
+            // says where the caret goes.
+            await click(at: target, button: .left, count: 1)
+            await type(node.text)
+        case .slide:
+            await slide(from: target, to: node.slideEnd, duration: node.slideDuration, button: node.button)
+        case .scroll:
+            await scroll(
+                at: target,
+                direction: node.scrollDirection,
+                distance: node.scrollDistance,
+                duration: node.scrollDuration
+            )
+        }
         return true
+    }
+
+    // MARK: - Typing
+
+    /// Types by overriding each event's unicode payload rather than looking up
+    /// virtual keycodes, so it is independent of the active keyboard layout and
+    /// handles anything the string can hold.
+    private func type(_ string: String) async {
+        guard !string.isEmpty else { return }
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let perCharacter = 1 / max(1, AppState.shared.autoClickTypingSpeed)
+
+        for character in string {
+            if Task.isCancelled { return }
+
+            if character == "\n" || character == "\r" {
+                // A literal newline in the payload is ignored by most text
+                // fields; they are watching for the Return key itself.
+                press(virtualKey: 36, source: source)
+            } else {
+                var utf16 = Array(String(character).utf16)
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+                else { return }
+                down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+                up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+            }
+
+            try? await Task.sleep(for: .seconds(varied(perCharacter)))
+        }
+    }
+
+    private func press(virtualKey: CGKeyCode, source: CGEventSource?) {
+        CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true)?.post(tap: .cghidEventTap)
+        CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false)?.post(tap: .cghidEventTap)
+    }
+
+    // MARK: - Sliding
+
+    /// Press, drag along an eased path, release. The release is posted on every
+    /// exit path — bailing out mid-drag would otherwise leave the system holding
+    /// a mouse button down with nothing to release it.
+    private func slide(from start: CGPoint, to end: CGPoint, duration: Double, button: ClickButton) async {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let (downType, upType, cgButton) = eventTypes(for: button)
+        let dragType = dragEventType(for: button)
+
+        post(source, type: downType, at: start, button: cgButton)
+        // Let the press land before anything moves: drag targets commonly need
+        // to see the button held at the origin first.
+        try? await Task.sleep(for: .milliseconds(40))
+
+        let steps = max(1, Int((max(0.05, duration) / CursorMotion.frameInterval).rounded()))
+        var last = start
+        for step in 1...steps {
+            if Task.isCancelled { break }
+            let t = Double(step) / Double(steps)
+            let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+            last = CGPoint(
+                x: start.x + (end.x - start.x) * eased,
+                y: start.y + (end.y - start.y) * eased
+            )
+            post(source, type: dragType, at: last, button: cgButton)
+            try? await Task.sleep(for: .seconds(CursorMotion.frameInterval))
+        }
+
+        post(source, type: upType, at: last, button: cgButton)
+    }
+
+    // MARK: - Scrolling
+
+    /// Posts real wheel events, which is a different thing from a drag: nothing
+    /// is pressed, and the scroll goes to whatever sits under the pointer rather
+    /// than to whatever holds focus — hence setting the event's location.
+    private func scroll(at point: CGPoint, direction: ScrollDirection, distance: Double, duration: Double) async {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let steps = max(1, Int((max(0.05, duration) / CursorMotion.frameInterval).rounded()))
+
+        // Wheel deltas are integers, so a small per-step amount would round away
+        // to nothing. Tracking what has actually been emitted keeps the total
+        // honest however finely the scroll is sliced.
+        var emitted = 0.0
+        for step in 1...steps {
+            if Task.isCancelled { return }
+
+            let progress = Double(step) / Double(steps)
+            let eased = progress < 0.5 ? 2 * progress * progress : 1 - pow(-2 * progress + 2, 2) / 2
+            let wanted = distance * eased
+            let chunk = (wanted - emitted).rounded(.towardZero)
+
+            if chunk != 0 {
+                let (vertical, horizontal) = direction.delta(chunk)
+                if let event = CGEvent(
+                    scrollWheelEvent2Source: source,
+                    units: .pixel,
+                    wheelCount: 2,
+                    wheel1: Int32(vertical),
+                    wheel2: Int32(horizontal),
+                    wheel3: 0
+                ) {
+                    event.location = point
+                    event.post(tap: .cghidEventTap)
+                }
+                emitted += abs(chunk)
+            }
+            try? await Task.sleep(for: .seconds(CursorMotion.frameInterval))
+        }
+    }
+
+    private func post(_ source: CGEventSource?, type: CGEventType, at point: CGPoint, button: CGMouseButton) {
+        CGEvent(
+            mouseEventSource: source,
+            mouseType: type,
+            mouseCursorPosition: point,
+            mouseButton: button
+        )?.post(tap: .cghidEventTap)
+    }
+
+    private func dragEventType(for button: ClickButton) -> CGEventType {
+        switch button {
+        case .left: return .leftMouseDragged
+        case .right: return .rightMouseDragged
+        case .middle: return .otherMouseDragged
+        }
     }
 
     private func click(at point: CGPoint, button: ClickButton, count: Int) async {
