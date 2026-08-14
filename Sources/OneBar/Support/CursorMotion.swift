@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -12,6 +13,23 @@ enum CursorMotion {
     /// already in the flipped, top-left-origin space that posted events use, so
     /// multi-monitor setups need no coordinate conversion.
     static var location: CGPoint? { CGEvent(source: nil)?.location }
+
+    /// Pins a destination inside the display `reference` sits on. A point past
+    /// the edge gets clamped by the WindowServer anyway — and the cursor would
+    /// then not be where we posted it, which `glide` reads as a hand on the
+    /// mouse and gives up on.
+    static func clamp(_ point: CGPoint, onDisplayContaining reference: CGPoint, margin: CGFloat = 6) -> CGPoint {
+        let screens = NSScreen.screens.map { screen -> CGRect in
+            CGRect(origin: screen.eventSpaceOrigin, size: screen.frame.size)
+        }
+        let bounds = screens.first { $0.contains(reference) } ?? screens.first ?? .zero
+        guard bounds.width > margin * 2, bounds.height > margin * 2 else { return point }
+        let usable = bounds.insetBy(dx: margin, dy: margin)
+        return CGPoint(
+            x: min(max(point.x, usable.minX), usable.maxX),
+            y: min(max(point.y, usable.minY), usable.maxY)
+        )
+    }
 
     /// Walks the cursor from `from` to `to`, returning false if a real hand took
     /// over partway and the move was abandoned.

@@ -64,6 +64,7 @@ Keyboard-driven panel (every key remappable in Preferences):
 - Glides the pointer out and back along a **smooth eased path** — no jarring teleport — which is all it takes to reset the idle clock those apps watch
 - **Never fights you for the cursor**: "Only while you're away" waits for real input to stop, and grabbing the mouse mid-sweep aborts the move instantly
 - Nothing is ever **clicked or typed** — it only moves
+- **Natural movement**: curves the path and varies its length, angle and timing, so it isn't a machine redrawing one line forever
 - Configurable interval, distance (up to 500 px) and speed, plus an auto-off timer and its own menubar icon while active
 
 ### 🎯 Auto click

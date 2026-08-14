@@ -84,6 +84,12 @@ final class AppState {
         didSet { UserDefaults.standard.set(mouseMoveOnlyWhenIdle, forKey: "mouseMoveOnlyWhenIdle") }
     }
 
+    /// Curve the sweep, vary its length and angle, and jitter the timing, so
+    /// the movement doesn't read as a machine drawing the same line forever.
+    var mouseMoveNatural: Bool {
+        didSet { UserDefaults.standard.set(mouseMoveNatural, forKey: "mouseMoveNatural") }
+    }
+
     /// Auto Mouse Move auto-off, in minutes; 0 = never.
     var mouseMoveAutoOffMinutes: Int {
         didSet { UserDefaults.standard.set(mouseMoveAutoOffMinutes, forKey: "mouseMoveAutoOffMinutes") }
@@ -182,6 +188,7 @@ final class AppState {
             "mouseMoveDistance": 250,
             "mouseMoveSpeed": 700.0,
             "mouseMoveOnlyWhenIdle": true,
+            "mouseMoveNatural": true,
             "mouseMoveAutoOffMinutes": 0,
             "autoClickRepeatCount": 0,
             "autoClickTravelSpeed": 1400.0,
@@ -212,6 +219,7 @@ final class AppState {
         mouseMoveDistance = min(defaults.integer(forKey: "mouseMoveDistance"), 500)
         mouseMoveSpeed = defaults.double(forKey: "mouseMoveSpeed")
         mouseMoveOnlyWhenIdle = defaults.bool(forKey: "mouseMoveOnlyWhenIdle")
+        mouseMoveNatural = defaults.bool(forKey: "mouseMoveNatural")
         mouseMoveAutoOffMinutes = defaults.integer(forKey: "mouseMoveAutoOffMinutes")
         autoClickRepeatCount = defaults.integer(forKey: "autoClickRepeatCount")
         autoClickTravelSpeed = defaults.double(forKey: "autoClickTravelSpeed")
