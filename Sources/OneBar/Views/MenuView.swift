@@ -135,12 +135,20 @@ struct MenuView: View {
     }
 
     private var turboRow: some View {
-        scanButton(
-            turbo.isRunning ? "Stop Turbo Click" : "Turbo Click",
-            systemImage: turbo.isRunning ? "bolt.slash.fill" : "bolt.fill"
-        ) {
-            dismiss()
-            turbo.toggle()
+        HStack(spacing: 8) {
+            scanButton(
+                turbo.isRunning ? "Stop Turbo" : "Turbo Click",
+                systemImage: turbo.isRunning ? "bolt.slash.fill" : "bolt.fill"
+            ) {
+                dismiss()
+                turbo.toggle()
+            }
+            scanButton("Pick Color", systemImage: "eyedropper") {
+                // The loupe takes over the pointer; the popover would sit on
+                // top of whatever you're trying to sample.
+                dismiss()
+                ColorPickerService.pick()
+            }
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 10)

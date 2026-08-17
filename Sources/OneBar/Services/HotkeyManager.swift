@@ -9,6 +9,7 @@ enum GlobalHotkey: UInt32 {
     case autoClickStop = 2
     case openClickPoints = 3
     case turboClick = 4
+    case pickColor = 5
 }
 
 /// Registers global hotkeys via Carbon — system-wide with no special
@@ -36,6 +37,9 @@ final class HotkeyManager {
         }
         register(.turboClick, binding: ShortcutStore.shared.binding(for: .turboClick)) {
             TurboClickService.shared.toggle()
+        }
+        register(.pickColor, binding: ShortcutStore.shared.binding(for: .pickColor)) {
+            ColorPickerService.pick()
         }
     }
 

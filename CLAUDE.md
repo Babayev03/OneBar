@@ -53,6 +53,8 @@ iconutil -c icns build/AppIcon.iconset -o Bundle/AppIcon.icns
 
 **Turbo click:** `TurboClickService` is deliberately *not* part of the sequence — it clicks wherever the pointer already is, reading `CursorMotion.location` every tick so it follows the cursor rather than latching a position. Starting it stops `AutoClickService`, since both drive the one pointer. Rate is capped at `TurboClickService.maxRate` (100/sec); Autoclick's author found macOS locks up past 900. It shares the Esc kill switch by registering the same `.autoClickStop` hotkey while it runs. Both it and the sequence post buttons through `Support/MouseEvents.swift`, so the events are identical — turbo skips the ~20ms hold because at high rates there is no room for one.
 
+**Pick Color:** `ColorPickerService` shows `NSColorSampler`, AppKit's own loupe — sampling happens outside our process, so unlike Scan Text/QR it needs no Screen Recording grant. The sample is converted through `usingColorSpace(.sRGB)` before its components are read, since it arrives in the sampled display's own space and `redComponent` on a non-RGB colour traps. The formatted string (`ColorFormat` in `Support/Models.swift`) just goes on the pasteboard; `ClipboardManager`'s poll picks it up as an ordinary text item, so history and search come free. A `nil` callback is Esc and stays silent, like a cancelled `screencapture -i`.
+
 **Menubar label:** `MenuBarExtra` mangles stacked/inline views in its label, so the live CPU/MEM readout is pre-rendered to a single template `NSImage` via `ImageRenderer` in `MenuBarLabel.statsImage`.
 
 ## Conventions
