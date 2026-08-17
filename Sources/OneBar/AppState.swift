@@ -147,6 +147,11 @@ final class AppState {
         didSet { UserDefaults.standard.set(autoClickAutoOffMinutes, forKey: "autoClickAutoOffMinutes") }
     }
 
+    /// Format a picked screen colour is copied in.
+    var colorPickerFormat: ColorFormat {
+        didSet { UserDefaults.standard.set(colorPickerFormat.rawValue, forKey: "colorPickerFormat") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -200,6 +205,7 @@ final class AppState {
             "autoClickAutoOffMinutes": 0,
             "turboClickRate": 25.0,
             "turboClickButton": "left",
+            "colorPickerFormat": "hex",
             "accentName": "blue"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
@@ -231,6 +237,7 @@ final class AppState {
         autoClickAutoOffMinutes = defaults.integer(forKey: "autoClickAutoOffMinutes")
         turboClickRate = defaults.double(forKey: "turboClickRate")
         turboClickButton = ClickButton(rawValue: defaults.string(forKey: "turboClickButton") ?? "") ?? .left
+        colorPickerFormat = ColorFormat(rawValue: defaults.string(forKey: "colorPickerFormat") ?? "") ?? .hex
         accentName = defaults.string(forKey: "accentName") ?? "blue"
     }
 }

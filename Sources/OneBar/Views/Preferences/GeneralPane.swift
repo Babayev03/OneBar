@@ -150,6 +150,32 @@ struct GeneralPane: View {
                 }
 
                 GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Copy picked colors as")
+                                .font(.system(size: 14))
+                            Spacer()
+                            Picker("", selection: colorFormatBinding) {
+                                ForEach(ColorFormat.allCases) { format in
+                                    Text(format.title).tag(format)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 180)
+                        }
+
+                        Text(state.colorPickerFormat.example)
+                            .font(.system(size: 12).monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(6)
+                } label: {
+                    Text("Pick Color")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                GroupBox {
                     HStack(spacing: 10) {
                         Text("Accent color")
                             .font(.system(size: 14))
@@ -234,6 +260,10 @@ struct GeneralPane: View {
                 SleepPreventionManager.shared.reapply()
             }
         )
+    }
+
+    private var colorFormatBinding: Binding<ColorFormat> {
+        Binding(get: { state.colorPickerFormat }, set: { state.colorPickerFormat = $0 })
     }
 
     private var cleaningBinding: Binding<Int> {
