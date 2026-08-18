@@ -6,8 +6,8 @@
 
 <p align="center">
   A free, open-source macOS menubar utility — clipboard history with OCR & QR superpowers,
-  system monitoring, keyboard cleaning, prevent-sleep, auto mouse move, and a
-  visual auto clicker with turbo mode. One icon, everything at hand.
+  system monitoring, brightness for every display, keyboard cleaning, prevent-sleep,
+  auto mouse move, and a visual auto clicker with turbo mode. One icon, everything at hand.
 </p>
 
 <p align="center">
@@ -59,6 +59,14 @@ Keyboard-driven panel (every key remappable in Preferences):
 - Keeps both the Mac **and the screen** awake — no screen turning off mid-task; an "Allow the display to sleep" option opts back out if you want the screen dark while the Mac keeps working
 - "Temporary & safe": auto-released on quit, optional auto-off timer, and a separate menubar cup icon while active so you can't forget it
 
+### 🔆 Display brightness
+- **Brightness sliders for every screen**, including external monitors macOS itself gives you no control over — the F1/F2 keys only ever move the built-in panel
+- Opens the way Control Center does: a **Display** row in the menu with a slider for the screen you're on, and a click takes you to a screen with **one card per monitor**
+- External monitors are driven over **DDC/CI**, the protocol the monitor's own scaler speaks, so it's the real backlight moving — the same thing the buttons on the monitor do
+- The built-in display goes through the same path macOS uses itself, so System Settings agrees with the slider
+- A monitor that won't answer DDC (some need DDC/CI enabling in their own menu) falls back to **software dimming**, which is labelled as such rather than pretending — and is put back the moment OneBar quits
+- **No new permissions**
+
 ### 🖱️ Auto mouse move
 - Keeps **Teams, Slack and friends on Available** instead of flipping you to Away while you're reading, on a call, or away from the desk
 - Glides the pointer out and back along a **smooth eased path** — no jarring teleport — which is all it takes to reset the idle clock those apps watch
@@ -104,6 +112,8 @@ macOS will ask for these on first use of the corresponding feature:
 - **Accessibility** — required for keyboard cleaning, auto mouse move, auto click, and pasting into other apps (System Settings → Privacy & Security → Accessibility)
 - **Screen Recording** — required for Scan Text / Scan QR
 
+Display brightness needs **neither** — DDC/CI and the built-in backlight are both permission-free.
+
 Everything runs **100% on-device**. OneBar makes no network requests, ever.
 
 ## Preferences
@@ -117,6 +127,7 @@ Everything runs **100% on-device**. OneBar makes no network requests, ever.
 - Auto mouse move interval, distance, speed, idle-awareness and auto-off
 - Auto click repeat count, travel speed, typing speed, click scatter, timing variation, path curve and auto-off
 - Turbo click rate and button
+- Display brightness controls on/off, and whether to fall back to software dimming
 
 ## License
 
