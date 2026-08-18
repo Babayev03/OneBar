@@ -85,6 +85,39 @@ struct GeneralPane: View {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
+                            Text("Show display brightness")
+                                .font(.system(size: 14))
+                            Spacer()
+                            Toggle("", isOn: brightnessBinding)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        }
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Software dimming fallback")
+                                    .font(.system(size: 14))
+                                Text("For monitors that don't answer DDC. Dims the picture rather than the backlight, so it also shows up in screenshots.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Toggle("", isOn: softwareDimmingBinding)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        }
+                    }
+                    .padding(6)
+                } label: {
+                    Text("Display Brightness")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
                             Text("Prevent Sleep mode")
                                 .font(.system(size: 14))
                             Spacer()
@@ -205,6 +238,29 @@ struct GeneralPane: View {
     }
 
     // MARK: - Bindings
+
+    private var brightnessBinding: Binding<Bool> {
+        Binding(
+            get: { state.brightnessEnabled },
+            set: { enabled in
+                state.brightnessEnabled = enabled
+                // Hiding the controls must not leave a screen we dimmed dark.
+                if !enabled { BrightnessService.shared.restoreGamma() }
+                BrightnessService.shared.refresh()
+            }
+        )
+    }
+
+    private var softwareDimmingBinding: Binding<Bool> {
+        Binding(
+            get: { state.brightnessSoftwareFallback },
+            set: { enabled in
+                state.brightnessSoftwareFallback = enabled
+                if !enabled { BrightnessService.shared.restoreGamma() }
+                BrightnessService.shared.refresh()
+            }
+        )
+    }
 
     private var liveStatsBinding: Binding<Bool> {
         Binding(

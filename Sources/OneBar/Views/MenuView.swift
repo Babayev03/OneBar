@@ -9,10 +9,81 @@ struct MenuView: View {
     private var clicker: AutoClickService { AutoClickService.shared }
     private var canvas: ClickCanvasController { ClickCanvasController.shared }
     private var turbo: TurboClickService { TurboClickService.shared }
+    private var brightness: BrightnessService { BrightnessService.shared }
 
+    /// Control Center pushes a section's detail over the whole popover rather
+    /// than opening a window; the menu does the same.
+    private enum Route {
+        case main
+        case brightness
+    }
+
+    @State private var route: Route = .main
     @State private var appeared = false
 
+    /// Measured so the Display screen can grow out of the row that opened it.
+    @State private var rowFrame: CGRect = .zero
+    @State private var mainSize: CGSize = .zero
+    @State private var panelHeight: CGFloat = 0
+
+    private static let menuSpace = "onebar.menu"
+
     var body: some View {
+        VStack(spacing: 0) {
+            switch route {
+            case .main:
+                mainScreen
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { mainSize = $0 }
+                    .transition(transition(into: mainSize.height))
+            case .brightness:
+                BrightnessScreen { route = .main }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
+                    .transition(transition(into: panelHeight))
+            }
+        }
+        .coordinateSpace(.named(Self.menuSpace))
+        .frame(width: 300)
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: route)
+        // Entrance: fade + blur + slight scale each time the popover opens.
+        // Scoped .animation (not withAnimation): a global transaction would
+        // also capture the window's first-open size fitting, making the whole
+        // popover grow in from the top-left corner.
+        .opacity(appeared ? 1 : 0)
+        .blur(radius: appeared ? 0 : 6)
+        .scaleEffect(appeared ? 1 : 0.94, anchor: .top)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: appeared)
+        .onAppear {
+            Task { @MainActor in appeared = true } // next tick, after first layout
+            brightness.refreshBuiltinValues()
+            brightness.startTracking()
+        }
+        .onDisappear {
+            appeared = false
+            route = .main
+            brightness.stopTracking()
+        }
+    }
+
+    // MARK: - Pushing to the Display screen
+
+    /// Anchored at the Display row, so the screen appears to come out of the
+    /// thing that was clicked rather than out of nowhere. `height` is the
+    /// height of the view being transformed — the anchor is in that view's own
+    /// unit space, not the popover's, so the row's position has to be
+    /// re-expressed against it.
+    private func transition(into height: CGFloat) -> AnyTransition {
+        .scale(scale: 0.92, anchor: rowAnchor(in: height)).combined(with: .opacity)
+    }
+
+    private func rowAnchor(in height: CGFloat) -> UnitPoint {
+        guard height > 0, mainSize.width > 0, rowFrame != .zero else { return .center }
+        return UnitPoint(
+            x: min(max(rowFrame.midX / mainSize.width, 0), 1),
+            y: min(max(rowFrame.midY / height, 0), 1)
+        )
+    }
+
+    private var mainScreen: some View {
         VStack(spacing: 0) {
             if state.systemMonitoringEnabled {
                 ringsRow
@@ -38,6 +109,8 @@ struct MenuView: View {
 
             scanRow
 
+            displayRow
+
             Divider()
                 .padding(.horizontal, 14)
 
@@ -59,20 +132,19 @@ struct MenuView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
         }
-        .frame(width: 300)
         .animation(.smooth(duration: 0.35), value: state.systemMonitoringEnabled)
-        // Entrance: fade + blur + slight scale each time the popover opens.
-        // Scoped .animation (not withAnimation): a global transaction would
-        // also capture the window's first-open size fitting, making the whole
-        // popover grow in from the top-left corner.
-        .opacity(appeared ? 1 : 0)
-        .blur(radius: appeared ? 0 : 6)
-        .scaleEffect(appeared ? 1 : 0.94, anchor: .top)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: appeared)
-        .onAppear {
-            Task { @MainActor in appeared = true } // next tick, after first layout
+    }
+
+    /// A doorway, not a control: the sliders all live on the Display screen.
+    /// Full width rather than paired, since nothing belongs beside it.
+    @ViewBuilder
+    private var displayRow: some View {
+        if state.brightnessEnabled, !brightness.displays.isEmpty {
+            scanButton("Display", systemImage: "sun.max") { route = .brightness }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 10)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.menuSpace)) } action: { rowFrame = $0 }
         }
-        .onDisappear { appeared = false }
     }
 
     private var ringsRow: some View {

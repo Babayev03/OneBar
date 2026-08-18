@@ -147,6 +147,17 @@ final class AppState {
         didSet { UserDefaults.standard.set(autoClickAutoOffMinutes, forKey: "autoClickAutoOffMinutes") }
     }
 
+    /// Show the Display brightness controls in the menu.
+    var brightnessEnabled: Bool {
+        didSet { UserDefaults.standard.set(brightnessEnabled, forKey: "brightnessEnabled") }
+    }
+
+    /// Dim a monitor that won't talk DDC with its gamma table instead. Off
+    /// leaves such a display listed but uncontrollable.
+    var brightnessSoftwareFallback: Bool {
+        didSet { UserDefaults.standard.set(brightnessSoftwareFallback, forKey: "brightnessSoftwareFallback") }
+    }
+
     /// Format a picked screen colour is copied in.
     var colorPickerFormat: ColorFormat {
         didSet { UserDefaults.standard.set(colorPickerFormat.rawValue, forKey: "colorPickerFormat") }
@@ -205,6 +216,8 @@ final class AppState {
             "autoClickAutoOffMinutes": 0,
             "turboClickRate": 25.0,
             "turboClickButton": "left",
+            "brightnessEnabled": true,
+            "brightnessSoftwareFallback": true,
             "colorPickerFormat": "hex",
             "accentName": "blue"
         ])
@@ -237,6 +250,8 @@ final class AppState {
         autoClickAutoOffMinutes = defaults.integer(forKey: "autoClickAutoOffMinutes")
         turboClickRate = defaults.double(forKey: "turboClickRate")
         turboClickButton = ClickButton(rawValue: defaults.string(forKey: "turboClickButton") ?? "") ?? .left
+        brightnessEnabled = defaults.bool(forKey: "brightnessEnabled")
+        brightnessSoftwareFallback = defaults.bool(forKey: "brightnessSoftwareFallback")
         colorPickerFormat = ColorFormat(rawValue: defaults.string(forKey: "colorPickerFormat") ?? "") ?? .hex
         accentName = defaults.string(forKey: "accentName") ?? "blue"
     }

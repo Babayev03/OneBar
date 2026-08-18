@@ -69,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if AppState.shared.menubarLiveStats {
             SystemStatsService.shared.start()
         }
+        BrightnessService.shared.start()
         HotkeyManager.shared.registerFromStore()
     }
 
@@ -79,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AutoClickService.shared.stop()
         TurboClickService.shared.stop()
         ClickCanvasController.shared.close()
+        BrightnessService.shared.restoreGamma()
         ClipboardManager.shared.saveNow()
     }
 }
