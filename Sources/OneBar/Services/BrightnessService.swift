@@ -48,6 +48,12 @@ final class BrightnessService {
     /// a screen you can't undim.
     private static let gammaFloor = 0.15
 
+    /// Displays the user has pushed onto software dimming because DDC did
+    /// nothing for them, keyed by something that survives a reconnect.
+    private var forcedSoftware: Set<String>
+    /// Last level we sent over DDC, for monitors that never answer a read.
+    private var lastKnown: [CGDirectDisplayID: Double] = [:]
+
     private let ddc = DDCBackend()
     private var observer: NSObjectProtocol?
     private var tracker: Timer?
@@ -56,7 +62,34 @@ final class BrightnessService {
     /// mid-ramp and would drag the slider back under the user's finger.
     private var lastLocalChange = Date.distantPast
 
-    private init() {}
+    private init() {
+        forcedSoftware = Set(UserDefaults.standard.stringArray(forKey: "brightnessForcedSoftware") ?? [])
+    }
+
+    /// Flips one display between DDC and gamma. The probe can only guess, and
+    /// on a monitor where it guesses wrong this is the way out.
+    func toggleSoftwareDimming(for id: CGDirectDisplayID) {
+        let key = Self.stableKey(id)
+        if forcedSoftware.contains(key) {
+            forcedSoftware.remove(key)
+        } else {
+            forcedSoftware.insert(key)
+            // Leaving the gamma table dimmed under a DDC display would stack
+            // the two dimmings on top of each other.
+            restoreGamma()
+        }
+        UserDefaults.standard.set(Array(forcedSoftware), forKey: "brightnessForcedSoftware")
+        refresh()
+    }
+
+    func usesSoftwareDimming(_ id: CGDirectDisplayID) -> Bool {
+        forcedSoftware.contains(Self.stableKey(id))
+    }
+
+    /// Display ids are handed out per connection; this survives a replug.
+    private static func stableKey(_ id: CGDirectDisplayID) -> String {
+        "\(CGDisplayVendorNumber(id))-\(CGDisplayModelNumber(id))-\(CGDisplaySerialNumber(id))"
+    }
 
     func start() {
         guard observer == nil else { return }
@@ -102,14 +135,23 @@ final class BrightnessService {
             return
         }
 
-        ddc.probe(externals) { [weak self] responsive in
+        ddc.probe(externals) { [weak self] levels, wired in
             guard let self else { return }
             let fallback = AppState.shared.brightnessSoftwareFallback
             var list = builtins
             for id in externals {
                 let name = names[id] ?? "Display"
-                if let current = responsive[id] {
-                    list.append(Display(id: id, name: name, method: .ddc, brightness: current))
+                let forced = self.forcedSoftware.contains(Self.stableKey(id))
+                if wired.contains(id), !forced {
+                    // A channel means a real cable. Answering a read is a
+                    // bonus — some monitors only ever listen — so an unanswered
+                    // probe still gets DDC, just without a starting value.
+                    list.append(Display(
+                        id: id,
+                        name: name,
+                        method: .ddc,
+                        brightness: levels[id] ?? self.lastKnown[id] ?? 1
+                    ))
                 } else if Self.isVirtual(id) {
                     list.append(Display(id: id, name: name, method: .virtual, brightness: 1))
                 } else if fallback {
@@ -167,6 +209,7 @@ final class BrightnessService {
         case .builtin:
             DisplayServicesShim.setBrightness(id, to: clamped)
         case .ddc:
+            lastKnown[id] = clamped
             ddc.set(clamped, for: id)
         case .gamma:
             applyGamma(clamped, to: id)
@@ -250,18 +293,23 @@ private final class DDCBackend {
     /// Asks each display for its current brightness. Answering at all is what
     /// counts as DDC support here — a monitor that stays silent is handed to
     /// the gamma fallback.
-    func probe(_ displayIDs: [CGDirectDisplayID], completion: @escaping ([CGDirectDisplayID: Double]) -> Void) {
+    func probe(
+        _ displayIDs: [CGDirectDisplayID],
+        completion: @escaping (_ levels: [CGDirectDisplayID: Double], _ wired: Set<CGDirectDisplayID>) -> Void
+    ) {
         queue.async {
-            var responsive: [CGDirectDisplayID: Double] = [:]
+            var levels: [CGDirectDisplayID: Double] = [:]
             var found: [CGDirectDisplayID: DDC.Channel] = [:]
             var maxes: [CGDirectDisplayID: UInt16] = [:]
 
             for (id, channel) in DDC.match(channels: DDC.channels(), to: displayIDs) {
+                // Keep the channel whether or not the monitor answers: plenty
+                // take writes happily while never replying to a read.
+                found[id] = channel
                 guard let values = DDC.read(channel, vcp: DDC.brightnessVCP) else { continue }
                 let maximum = values.max == 0 ? 100 : values.max
-                found[id] = channel
                 maxes[id] = maximum
-                responsive[id] = min(Double(values.current) / Double(maximum), 1)
+                levels[id] = min(Double(values.current) / Double(maximum), 1)
             }
 
             self.lock.lock()
@@ -269,7 +317,7 @@ private final class DDCBackend {
             self.maxValues = maxes
             self.lock.unlock()
 
-            DispatchQueue.main.async { completion(responsive) }
+            DispatchQueue.main.async { completion(levels, Set(found.keys)) }
         }
     }
 

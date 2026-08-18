@@ -76,6 +76,21 @@ struct DisplayCard: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
+
+            // The probe can only guess whether a monitor really answers DDC.
+            // Where it can be wrong, let it be overruled.
+            if display.method == .ddc || display.method == .gamma {
+                Toggle(isOn: Binding(
+                    get: { service.usesSoftwareDimming(display.id) },
+                    set: { _ in service.toggleSoftwareDimming(for: display.id) }
+                )) {
+                    Text("Software dimming")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -84,7 +99,7 @@ struct DisplayCard: View {
 
     private var note: String? {
         switch display.method {
-        case .gamma: return "Software dimming — the backlight isn't changing"
+        case .gamma: return "Dimming the picture, not the backlight"
         case .virtual: return "AirPlay display — brightness is set on the device itself"
         case .unsupported: return "This display doesn't support brightness control"
         case .builtin, .ddc: return nil
