@@ -54,7 +54,7 @@ struct MenuView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: appeared)
         .onAppear {
             Task { @MainActor in appeared = true } // next tick, after first layout
-            brightness.refreshBuiltinValues()
+            brightness.refreshSystemValues()
             brightness.startTracking()
         }
         .onDisappear {

@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AutoClickService.shared.stop()
         TurboClickService.shared.stop()
         ClickCanvasController.shared.close()
-        BrightnessService.shared.restoreGamma()
+        BrightnessService.shared.restoreDimming()
         ClipboardManager.shared.saveNow()
     }
 }

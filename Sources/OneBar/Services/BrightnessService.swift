@@ -14,14 +14,19 @@ final class BrightnessService {
 
     struct Display: Identifiable {
         enum Method {
-            case builtin
+            /// Apple's own private brightness API — the built-in panel, and
+            /// Apple external displays like the Studio Display, which speak no
+            /// DDC either.
+            case displayServices
             case ddc
             /// Faking it with the gamma table — dims the picture, not the
             /// backlight.
             case gamma
-            /// AirPlay, Sidecar and friends: invented in software, so there is
-            /// nothing to dim. Gamma writes are accepted and then ignored.
-            case virtual
+            /// AirPlay, Sidecar and friends. No backlight to command and a
+            /// gamma table that is accepted then ignored — but they still
+            /// composite windows, so a black window over the top is what
+            /// dims them.
+            case shade
             case unsupported
         }
 
@@ -32,8 +37,8 @@ final class BrightnessService {
 
         var isAdjustable: Bool {
             switch method {
-            case .builtin, .ddc, .gamma: return true
-            case .virtual, .unsupported: return false
+            case .displayServices, .ddc, .gamma, .shade: return true
+            case .unsupported: return false
             }
         }
     }
@@ -74,9 +79,9 @@ final class BrightnessService {
             forcedSoftware.remove(key)
         } else {
             forcedSoftware.insert(key)
-            // Leaving the gamma table dimmed under a DDC display would stack
-            // the two dimmings on top of each other.
-            restoreGamma()
+            // Leaving this display's gamma dimmed under DDC would stack the two
+            // dimmings; the others must keep theirs.
+            restoreDimming(for: id)
         }
         UserDefaults.standard.set(Array(forcedSoftware), forKey: "brightnessForcedSoftware")
         refresh()
@@ -111,18 +116,28 @@ final class BrightnessService {
             return
         }
 
+        ShadeController.shared.reposition()
+
         let names = screenNames()
-        var builtins: [Display] = []
+        var known: [Display] = []
         var externals: [CGDirectDisplayID] = []
 
         for id in onlineDisplayIDs() {
             let name = names[id] ?? "Display"
-            if CGDisplayIsBuiltin(id) != 0 {
-                guard DisplayServicesShim.canChangeBrightness(id) else { continue }
-                builtins.append(Display(
+            if Self.isVirtual(id) {
+                // No backlight to command, and a gamma table that is accepted
+                // then ignored. A window over the top is the only lever.
+                known.append(Display(
                     id: id,
                     name: name,
-                    method: .builtin,
+                    method: .shade,
+                    brightness: ShadeController.shared.brightness(for: id)
+                ))
+            } else if DisplayServicesShim.canChangeBrightness(id) {
+                known.append(Display(
+                    id: id,
+                    name: name,
+                    method: .displayServices,
                     brightness: DisplayServicesShim.brightness(id) ?? 1
                 ))
             } else {
@@ -131,14 +146,14 @@ final class BrightnessService {
         }
 
         guard !externals.isEmpty else {
-            displays = builtins
+            displays = known
             return
         }
 
         ddc.probe(externals) { [weak self] levels, wired in
             guard let self else { return }
             let fallback = AppState.shared.brightnessSoftwareFallback
-            var list = builtins
+            var list = known
             for id in externals {
                 let name = names[id] ?? "Display"
                 let forced = self.forcedSoftware.contains(Self.stableKey(id))
@@ -152,8 +167,6 @@ final class BrightnessService {
                         method: .ddc,
                         brightness: levels[id] ?? self.lastKnown[id] ?? 1
                     ))
-                } else if Self.isVirtual(id) {
-                    list.append(Display(id: id, name: name, method: .virtual, brightness: 1))
                 } else if fallback {
                     // Gamma dies with the display's configuration, so a display
                     // we were already dimming has to be dimmed again.
@@ -168,15 +181,15 @@ final class BrightnessService {
         }
     }
 
-    /// Follows the built-in panel while the menu is on screen: the brightness
+    /// Follows those displays while the menu is on screen: the brightness
     /// keys move it without telling anyone, and a slider that only updates when
     /// reopened looks broken. Polling beats the private change-notification
     /// callback here — reading is a cheap local call, and getting a private
     /// C callback signature wrong crashes the app.
     func startTracking() {
-        guard tracker == nil, displays.contains(where: { $0.method == .builtin }) else { return }
+        guard tracker == nil, displays.contains(where: { $0.method == .displayServices }) else { return }
         let timer = Timer(timeInterval: 0.15, repeats: true) { _ in
-            Task { @MainActor in BrightnessService.shared.pollBuiltin() }
+            Task { @MainActor in BrightnessService.shared.pollSystemBrightness() }
         }
         // .common, or it stops dead while the menu is being tracked — which is
         // exactly when it needs to run.
@@ -189,9 +202,9 @@ final class BrightnessService {
         tracker = nil
     }
 
-    private func pollBuiltin() {
+    private func pollSystemBrightness() {
         guard Date().timeIntervalSince(lastLocalChange) > 0.4 else { return }
-        for index in displays.indices where displays[index].method == .builtin {
+        for index in displays.indices where displays[index].method == .displayServices {
             guard let value = DisplayServicesShim.brightness(displays[index].id) else { continue }
             if abs(value - displays[index].brightness) > 0.001 {
                 displays[index].brightness = value
@@ -206,23 +219,25 @@ final class BrightnessService {
         lastLocalChange = Date()
 
         switch displays[index].method {
-        case .builtin:
+        case .displayServices:
             DisplayServicesShim.setBrightness(id, to: clamped)
         case .ddc:
             lastKnown[id] = clamped
             ddc.set(clamped, for: id)
         case .gamma:
             applyGamma(clamped, to: id)
-        case .virtual, .unsupported:
+        case .shade:
+            ShadeController.shared.setBrightness(clamped, for: id)
+        case .unsupported:
             break
         }
     }
 
-    /// Cheap re-read of the built-in panel. Its own brightness keys move it
-    /// without telling us, and unlike DDC this costs nothing — so the menu can
-    /// do it every time it opens.
-    func refreshBuiltinValues() {
-        for index in displays.indices where displays[index].method == .builtin {
+    /// Cheap re-read of whatever DisplayServices drives. The brightness keys
+    /// move those displays without telling us, and unlike DDC this costs
+    /// nothing — so the menu can do it every time it opens.
+    func refreshSystemValues() {
+        for index in displays.indices where displays[index].method == .displayServices {
             if let value = DisplayServicesShim.brightness(displays[index].id) {
                 displays[index].brightness = value
             }
@@ -230,20 +245,34 @@ final class BrightnessService {
     }
 
     /// Called on quit — a gamma table left dimmed would outlive the app and
-    /// leave the user with a dark screen and nothing to fix it with.
-    func restoreGamma() {
+    /// leave the user with a dark screen and nothing to fix it with. Shades die
+    /// with the process, but not with a mere refresh.
+    func restoreDimming() {
+        ShadeController.shared.removeAll()
         guard !gammaValues.isEmpty else { return }
         CGDisplayRestoreColorSyncSettings()
         gammaValues.removeAll()
     }
 
-    /// A real monitor's vendor id comes off its EDID chip and is 16 bits. A
-    /// virtual display has no EDID, so macOS invents one out of ASCII —
-    /// AirPlay reports "aapl" / "airp". Anything too big to be an EDID vendor
-    /// is therefore a display with no hardware behind it, and neither DDC nor
-    /// the gamma table will reach it.
+    /// macOS says so itself, in the display's CoreDisplay info dictionary.
+    /// The fallback is the shape of the vendor id: a real monitor's comes off
+    /// its EDID chip and is 16 bits, while a display invented in software has
+    /// no EDID and gets ASCII instead — AirPlay reports "aapl" / "airp".
     private static func isVirtual(_ id: CGDirectDisplayID) -> Bool {
-        CGDisplayVendorNumber(id) > 0xFFFF
+        if let info = DDC.displayInfo(id) {
+            if let virtual = info["kCGDisplayIsVirtualDevice"] as? Bool { return virtual }
+            if let airPlay = info["kCGDisplayIsAirPlay"] as? Bool { return airPlay }
+        }
+        return CGDisplayVendorNumber(id) > 0xFFFF
+    }
+
+    /// Undims one display, leaving the rest as they are. There is no
+    /// per-display gamma restore, so the others are re-applied afterwards.
+    func restoreDimming(for id: CGDirectDisplayID) {
+        ShadeController.shared.remove(id)
+        guard gammaValues.removeValue(forKey: id) != nil else { return }
+        CGDisplayRestoreColorSyncSettings()
+        for (other, value) in gammaValues { applyGamma(value, to: other) }
     }
 
     private func applyGamma(_ value: Double, to id: CGDirectDisplayID) {
