@@ -10,12 +10,14 @@ struct MenuView: View {
     private var canvas: ClickCanvasController { ClickCanvasController.shared }
     private var turbo: TurboClickService { TurboClickService.shared }
     private var brightness: BrightnessService { BrightnessService.shared }
+    private var sleep: SleepPreventionManager { SleepPreventionManager.shared }
 
     /// Control Center pushes a section's detail over the whole popover rather
     /// than opening a window; the menu does the same.
     private enum Route {
         case main
         case brightness
+        case sleep
     }
 
     @State private var route: Route = .main
@@ -37,6 +39,10 @@ struct MenuView: View {
                     .transition(transition(into: mainSize.height))
             case .brightness:
                 BrightnessScreen { route = .main }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
+                    .transition(transition(into: panelHeight))
+            case .sleep:
+                SleepScreen(back: { route = .main }, dismissMenu: { dismiss() })
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
                     .transition(transition(into: panelHeight))
             }
@@ -98,7 +104,6 @@ struct MenuView: View {
                     ClipboardPanelController.shared.show()
                 }
                 toggleRow("Keyboard Cleaning", isOn: keyboardCleaningBinding)
-                toggleRow("Prevent Sleep", isOn: preventSleepBinding)
                 toggleRow("Auto Mouse Move", isOn: mouseMoveBinding)
             }
             .padding(.vertical, 10)
@@ -109,7 +114,7 @@ struct MenuView: View {
 
             scanRow
 
-            displayRow
+            screensRow
 
             Divider()
                 .padding(.horizontal, 14)
@@ -135,16 +140,31 @@ struct MenuView: View {
         .animation(.smooth(duration: 0.35), value: state.systemMonitoringEnabled)
     }
 
-    /// A doorway, not a control: the sliders all live on the Display screen.
-    /// Full width rather than paired, since nothing belongs beside it.
-    @ViewBuilder
-    private var displayRow: some View {
-        if state.brightnessEnabled, !brightness.displays.isEmpty {
-            scanButton("Display", systemImage: "sun.max") { route = .brightness }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 10)
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.menuSpace)) } action: { rowFrame = $0 }
+    /// Doorways, not controls: the sliders live on the Display screen and the
+    /// session buttons on the Prevent Sleep one. Both screens grow out of this
+    /// row, so it is the one that gets measured.
+    private var screensRow: some View {
+        // Each on its own full-width row rather than paired: these open
+        // screens, and a doorway reads better wide than squeezed beside
+        // another one.
+        VStack(spacing: 8) {
+            if state.brightnessEnabled, !brightness.displays.isEmpty {
+                scanButton("Display", systemImage: "sun.max") { route = .brightness }
+            }
+            scanButton(
+                sleepTitle,
+                systemImage: sleep.isActive ? "cup.and.saucer.fill" : "moon.zzz"
+            ) { route = .sleep }
         }
+        .padding(.horizontal, 18)
+        .padding(.bottom, 10)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.menuSpace)) } action: { rowFrame = $0 }
+    }
+
+    private var sleepTitle: String {
+        guard sleep.isActive else { return "Prevent Sleep" }
+        if let remaining = sleep.remaining { return "Awake \(Countdown.short(remaining))" }
+        return "Awake"
     }
 
     private var ringsRow: some View {
@@ -322,20 +342,6 @@ struct MenuView: View {
                     MouseMoveService.shared.stop()
                     state.mouseMoveActive = false
                 }
-            }
-        )
-    }
-
-    private var preventSleepBinding: Binding<Bool> {
-        Binding(
-            get: { state.preventSleepActive },
-            set: { enabled in
-                if enabled {
-                    SleepPreventionManager.shared.start()
-                } else {
-                    SleepPreventionManager.shared.stop()
-                }
-                state.preventSleepActive = SleepPreventionManager.shared.isActive
             }
         )
     }
