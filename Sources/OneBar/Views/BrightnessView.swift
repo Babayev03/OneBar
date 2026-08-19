@@ -100,9 +100,9 @@ struct DisplayCard: View {
     private var note: String? {
         switch display.method {
         case .gamma: return "Dimming the picture, not the backlight"
-        case .virtual: return "AirPlay display — brightness is set on the device itself"
+        case .shade: return "Dimmed with an overlay — the display's own backlight is unchanged"
         case .unsupported: return "This display doesn't support brightness control"
-        case .builtin, .ddc: return nil
+        case .displayServices, .ddc: return nil
         }
     }
 

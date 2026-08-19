@@ -62,7 +62,11 @@ enum DDC {
         )
     }()
 
-    static var isAvailable: Bool { symbols.create != nil && symbols.write != nil }
+    /// CoreDisplay's own description of a display — the authority on whether it
+    /// is a real panel or something invented in software.
+    static func displayInfo(_ displayID: CGDirectDisplayID) -> NSDictionary? {
+        symbols.displayInfo?(displayID)?.takeRetainedValue() as NSDictionary?
+    }
 
     // MARK: - Reading and writing a feature
 

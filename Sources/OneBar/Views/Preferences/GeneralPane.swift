@@ -245,7 +245,7 @@ struct GeneralPane: View {
             set: { enabled in
                 state.brightnessEnabled = enabled
                 // Hiding the controls must not leave a screen we dimmed dark.
-                if !enabled { BrightnessService.shared.restoreGamma() }
+                if !enabled { BrightnessService.shared.restoreDimming() }
                 BrightnessService.shared.refresh()
             }
         )
@@ -256,7 +256,7 @@ struct GeneralPane: View {
             get: { state.brightnessSoftwareFallback },
             set: { enabled in
                 state.brightnessSoftwareFallback = enabled
-                if !enabled { BrightnessService.shared.restoreGamma() }
+                if !enabled { BrightnessService.shared.restoreDimming() }
                 BrightnessService.shared.refresh()
             }
         )
