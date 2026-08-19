@@ -63,6 +63,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        // Mops up after a previous run that was force quit or crashed:
+        // the lid switch lives in the system and survives the process
+        // that set it, and nothing else would ever put it back.
+        Clamshell.setSleepDisabled(false)
+
         if AppState.shared.clipboardEnabled {
             ClipboardManager.shared.startPolling()
         }
@@ -75,6 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         SleepPreventionManager.shared.stop()
+        // Belt and braces: the lid switch lives in the kernel, not in
+        // this process, so a half-torn-down session must not be able to
+        // leave it flipped.
+        Clamshell.setSleepDisabled(false)
         KeyboardCleaningManager.shared.stop()
         MouseMoveService.shared.stop()
         AutoClickService.shared.stop()

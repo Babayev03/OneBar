@@ -52,14 +52,36 @@ final class AppState {
         didSet { UserDefaults.standard.set(cleaningDuration, forKey: "cleaningDuration") }
     }
 
-    /// Prevent-sleep auto-off, in minutes; 0 = never.
-    var sleepAutoOffMinutes: Int {
-        didSet { UserDefaults.standard.set(sleepAutoOffMinutes, forKey: "sleepAutoOffMinutes") }
-    }
-
     /// Let the screen turn off while Prevent Sleep keeps the Mac itself awake.
     var allowDisplaySleep: Bool {
         didSet { UserDefaults.standard.set(allowDisplaySleep, forKey: "allowDisplaySleep") }
+    }
+
+    /// Keep a session running with the lid shut — the part macOS otherwise
+    /// refuses on battery.
+    var sleepLidClosed: Bool {
+        didSet { UserDefaults.standard.set(sleepLidClosed, forKey: "sleepLidClosed") }
+    }
+
+    /// End the session rather than let a forgotten one flatten the battery.
+    var sleepEndOnLowBattery: Bool {
+        didSet { UserDefaults.standard.set(sleepEndOnLowBattery, forKey: "sleepEndOnLowBattery") }
+    }
+
+    /// Charge percentage the cutoff above fires at.
+    var sleepLowBatteryPercent: Int {
+        didSet { UserDefaults.standard.set(sleepLowBatteryPercent, forKey: "sleepLowBatteryPercent") }
+    }
+
+    /// HUD when a session starts and when it ends.
+    var sleepNotifications: Bool {
+        didSet { UserDefaults.standard.set(sleepNotifications, forKey: "sleepNotifications") }
+    }
+
+    /// Seconds a watched download may go without growing before its session
+    /// ends.
+    var sleepDownloadTimeout: Double {
+        didSet { UserDefaults.standard.set(sleepDownloadTimeout, forKey: "sleepDownloadTimeout") }
     }
 
     /// Seconds of idle time Auto Mouse Move tolerates before nudging the cursor.
@@ -168,9 +190,17 @@ final class AppState {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
     }
 
+    /// Taken from AppKit rather than SwiftUI: `Color.blue` is #0091FF, a notch
+    /// cyanier than the #007AFF every native control draws with, and a filled
+    /// button beside a segmented control shows the difference immediately.
     static let accentChoices: [(name: String, color: Color)] = [
-        ("blue", .blue), ("purple", .purple), ("pink", .pink),
-        ("red", .red), ("orange", .orange), ("green", .green), ("teal", .teal)
+        ("blue", Color(.sRGB, red: 0, green: 122 / 255, blue: 1)),
+        ("purple", Color(nsColor: .systemPurple)),
+        ("pink", Color(nsColor: .systemPink)),
+        ("red", Color(nsColor: .systemRed)),
+        ("orange", Color(nsColor: .systemOrange)),
+        ("green", Color(nsColor: .systemGreen)),
+        ("teal", Color(nsColor: .systemTeal))
     ]
 
     var accentColor: Color {
@@ -198,8 +228,12 @@ final class AppState {
             "critThreshold": 0.85,
             "statsInterval": 5.0,
             "cleaningDuration": 60,
-            "sleepAutoOffMinutes": 0,
             "allowDisplaySleep": false,
+            "sleepLidClosed": false,
+            "sleepEndOnLowBattery": true,
+            "sleepLowBatteryPercent": 10,
+            "sleepNotifications": true,
+            "sleepDownloadTimeout": 30.0,
             "mouseMoveInterval": 60.0,
             "mouseMoveDistance": 250,
             "mouseMoveSpeed": 700.0,
@@ -230,8 +264,12 @@ final class AppState {
         critThreshold = defaults.double(forKey: "critThreshold")
         statsInterval = defaults.double(forKey: "statsInterval")
         cleaningDuration = defaults.integer(forKey: "cleaningDuration")
-        sleepAutoOffMinutes = defaults.integer(forKey: "sleepAutoOffMinutes")
         allowDisplaySleep = defaults.bool(forKey: "allowDisplaySleep")
+        sleepLidClosed = defaults.bool(forKey: "sleepLidClosed")
+        sleepEndOnLowBattery = defaults.bool(forKey: "sleepEndOnLowBattery")
+        sleepLowBatteryPercent = defaults.integer(forKey: "sleepLowBatteryPercent")
+        sleepNotifications = defaults.bool(forKey: "sleepNotifications")
+        sleepDownloadTimeout = defaults.double(forKey: "sleepDownloadTimeout")
         mouseMoveInterval = defaults.double(forKey: "mouseMoveInterval")
         // Clamped on read: the slider's ceiling came down after release, and a
         // value stored above it would otherwise stick around unreachable.

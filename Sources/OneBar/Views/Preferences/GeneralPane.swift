@@ -116,57 +116,6 @@ struct GeneralPane: View {
                 }
 
                 GroupBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("Prevent Sleep mode")
-                                .font(.system(size: 14))
-                            Spacer()
-                            Picker("", selection: .constant("temporary")) {
-                                Text("Temporary & safe").tag("temporary")
-                            }
-                            .labelsHidden()
-                            .frame(width: 180)
-                        }
-
-                        HStack {
-                            Text("Auto turn off after")
-                                .font(.system(size: 14))
-                            Spacer()
-                            Picker("", selection: autoOffBinding) {
-                                Text("Never").tag(0)
-                                Text("30 minutes").tag(30)
-                                Text("1 hour").tag(60)
-                                Text("2 hours").tag(120)
-                            }
-                            .labelsHidden()
-                            .frame(width: 140)
-                        }
-
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Allow the display to sleep")
-                                    .font(.system(size: 14))
-                                Text("Keeps the Mac awake but lets the screen turn off.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Toggle("", isOn: allowDisplaySleepBinding)
-                                .toggleStyle(.switch)
-                                .labelsHidden()
-                        }
-
-                        Divider()
-
-                        Text("This option works as long as your MacBook lid is open. It is automatically turned off if you exit OneBar, which makes it safer – impossible to forget that it's on.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(6)
-                }
-
-                GroupBox {
                     HStack {
                         Text("Keyboard cleaning duration")
                             .font(.system(size: 14))
@@ -300,20 +249,6 @@ struct GeneralPane: View {
             get: { state.critThreshold },
             set: { value in
                 state.critThreshold = max(value, state.warnThreshold + 0.05)
-            }
-        )
-    }
-
-    private var autoOffBinding: Binding<Int> {
-        Binding(get: { state.sleepAutoOffMinutes }, set: { state.sleepAutoOffMinutes = $0 })
-    }
-
-    private var allowDisplaySleepBinding: Binding<Bool> {
-        Binding(
-            get: { state.allowDisplaySleep },
-            set: { allowed in
-                state.allowDisplaySleep = allowed
-                SleepPreventionManager.shared.reapply()
             }
         )
     }

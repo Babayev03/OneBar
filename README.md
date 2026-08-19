@@ -56,8 +56,10 @@ Keyboard-driven panel (every key remappable in Preferences):
 - **Touch ID keeps working** — a fingerprint read goes straight to the Secure Enclave and never passes through the key blocker
 
 ### ☕ Prevent sleep
-- Keeps both the Mac **and the screen** awake — no screen turning off mid-task; an "Allow the display to sleep" option opts back out if you want the screen dark while the Mac keeps working
-- "Temporary & safe": auto-released on quit, optional auto-off timer, and a separate menubar cup icon while active so you can't forget it
+- **Sessions, not a switch**: keep the Mac awake indefinitely, for a set number of minutes or hours, for a custom length, until a time of day, **while an app is running**, or **while a file is downloading** — the session ends itself when its reason does
+- **Closed-lid mode**: keeps working with the lid shut *on battery*, which macOS otherwise refuses without a power adapter and an external display
+- Keeps the screen awake too, unless you opt out with "Let the display sleep"
+- Safe by construction: a **low-battery cutoff**, a live countdown on a separate menubar cup icon, and everything — including the lid — handed back on quit, on ⌘Q, and on the next launch after a crash
 
 ### 🔆 Display brightness
 - **Brightness sliders for every screen**, including external monitors macOS itself gives you no control over — the F1/F2 keys only ever move the built-in panel
