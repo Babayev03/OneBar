@@ -21,6 +21,12 @@ struct SoundScreen: View {
     /// others follow.
     @State private var picked: [String] = []
     @State private var groupName = ""
+    @State private var appSearch = ""
+    /// Owned explicitly so the field can be focused on arrival and, more
+    /// importantly, *unfocused* on the way out — a text field that keeps first
+    /// responder as the page changes leaves its focus ring drawn around
+    /// whichever view lands in its place.
+    @FocusState private var searchFocused: Bool
     @State private var hovered: String?
 
     private var service: SoundService { SoundService.shared }
@@ -56,6 +62,7 @@ struct SoundScreen: View {
         Button {
             // One layer at a time: Add-an-app goes back to the app list, not
             // out to the Sound screen.
+            searchFocused = false
             switch page {
             case .root: back()
             case .addApp: page = .apps
@@ -199,6 +206,9 @@ struct SoundScreen: View {
             if !appAudio.apps.isEmpty { divider }
 
             row("Add an app…", id: "addapp", leading: "plus") {
+                appSearch = ""
+                // Scanned here, once, rather than while the list is on screen.
+                appAudio.refreshCandidates()
                 page = .addApp
             }
         }
@@ -218,29 +228,45 @@ struct SoundScreen: View {
         //         .padding(.horizontal, 4)
         // }
 
-        Text("Apps on this list play through OneBar, even at 100% — that is what keeps level changes silent instead of clicking. Anything not listed is untouched; remove one with ✕ to take OneBar back out of its audio.")
+        Text(appAudio.apps.isEmpty
+             ? "Add an app to give it its own volume. Nothing appears here on its own — only what you add is routed through OneBar."
+             : "Apps on this list play through OneBar, even at 100% — that is what keeps level changes silent instead of clicking. Anything not listed is untouched; remove one with ✕ to take OneBar back out of its audio.")
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4)
     }
 
-    /// Every running app, so a level can be set before the app ever plays.
+    /// Everything installed, not only what is running — a level can be set for
+    /// an app that isn't open yet and simply waits for it.
     private var addAppPage: some View {
-        let candidates = appAudio.addableApps
-        return Group {
+        let candidates = appAudio.candidates(matching: appSearch)
+        return VStack(spacing: 8) {
+            TextField("Search", text: $appSearch)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .font(.system(size: 12))
+                .focused($searchFocused)
+                // Next tick, after the page has laid out: focusing during the
+                // transition does not take.
+                .onAppear { Task { @MainActor in searchFocused = true } }
+
             if candidates.isEmpty {
-                Text("Every running app is already listed.")
+                Text(appSearch.isEmpty ? "Nothing left to add." : "No app matches that.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             } else {
                 card {
                     ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(candidates, id: \.bundleID) { candidate in
+                        // Lazy: a hundred rows, each with an icon, are not all
+                        // built to show eight of them.
+                        LazyVStack(spacing: 0) {
+                            ForEach(candidates) { candidate in
                                 Button {
+                                    searchFocused = false
                                     appAudio.add(bundleID: candidate.bundleID, name: candidate.name)
+                                    appSearch = ""
                                     page = .apps
                                 } label: {
                                     HStack(spacing: 7) {
@@ -252,7 +278,20 @@ struct SoundScreen: View {
                                         Text(candidate.name)
                                             .font(.system(size: 13))
                                             .lineLimit(1)
+
                                         Spacer()
+
+                                        if candidate.isPlaying {
+                                            Text("playing")
+                                                .font(.system(size: 9))
+                                                .foregroundStyle(hovered == candidate.bundleID
+                                                                 ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                                        } else if candidate.isRunning {
+                                            Text("open")
+                                                .font(.system(size: 9))
+                                                .foregroundStyle(hovered == candidate.bundleID
+                                                                 ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                                        }
                                     }
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
@@ -274,7 +313,12 @@ struct SoundScreen: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 280)
+                    // An explicit height, not a maximum: a ScrollView has no
+                    // height of its own, and the popover sizes itself to fit
+                    // its content, so `maxHeight` collapses it to a couple of
+                    // rows. Sized to the list until it would outgrow the
+                    // popover.
+                    .frame(height: min(300, CGFloat(candidates.count) * 27 + 8))
                 }
             }
         }

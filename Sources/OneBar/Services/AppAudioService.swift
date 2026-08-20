@@ -207,52 +207,105 @@ final class AppAudioService {
             seen.insert(bundleID)
         }
 
-        // Plus whatever is making noise right now and hasn't been added.
-        for process in live where process.isPlaying {
-            let owner = running.first {
-                $0.localizedName?.caseInsensitiveCompare(process.name) == .orderedSame
-                    || $0.bundleIdentifier == process.bundleID
-            }
-            // No Dock app behind it means it is a daemon, not something anyone
-            // means by "an app": com.apple.CoreSpeech holds an audio stream
-            // open for Siri and dictation more or less permanently, and
-            // systemsoundserverd, assistantd and friends do the same. A
-            // daemon with a volume slider is noise in both senses.
-            guard let owner, let bundleID = owner.bundleIdentifier else { continue }
-            guard !seen.contains(bundleID) else { continue }
-            listed.append(App(
-                bundleID: bundleID,
-                name: owner.localizedName ?? process.name,
-                icon: owner.icon ?? process.icon,
-                isPlaying: true,
-                isRunning: true,
-                volume: settings[bundleID]?.volume ?? 1,
-                isMuted: settings[bundleID]?.isMuted ?? false
-            ))
-            seen.insert(bundleID)
-        }
-
+        // Nothing is listed on its own. A list that fills itself cannot also
+        // have a remove button that means "stay gone" — removing an app while
+        // it was playing put it straight back, which read as a broken button.
+        // To change an app's level you add it first.
         apps = listed.sorted {
             if $0.isPlaying != $1.isPlaying { return $0.isPlaying }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
+        _ = running
 
         syncTaps(live: live)
     }
 
-    /// Apps you could add — everything with a Dock icon that isn't listed yet.
-    var addableApps: [(bundleID: String, name: String, icon: NSImage?)] {
-        let already = Set(apps.map(\.bundleID))
-        return NSWorkspace.shared.runningApplications
-            .filter {
-                $0.activationPolicy == .regular
-                    && $0.bundleIdentifier != nil
-                    && $0.bundleIdentifier != Bundle.main.bundleIdentifier
-                    && !already.contains($0.bundleIdentifier!)
-            }
-            .map { ($0.bundleIdentifier!, $0.localizedName ?? "App", $0.icon) }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    struct Candidate: Identifiable {
+        var id: String { bundleID }
+        let bundleID: String
+        let name: String
+        let icon: NSImage?
+        let isRunning: Bool
+        let isPlaying: Bool
     }
+
+    @ObservationIgnored private var candidateCache: [Candidate] = []
+
+    /// Builds the addable list. Reads every installed app's Info.plist and
+    /// icon, so it is called when the picker opens — **never** from a view
+    /// body, where a hover would re-run it a hundred times a second.
+    func refreshCandidates() {
+        let live = AudioProcess.all()
+        var found: [String: Candidate] = [:]
+
+        for app in NSWorkspace.shared.runningApplications
+        where app.activationPolicy == .regular {
+            guard let bundleID = app.bundleIdentifier,
+                  bundleID != Bundle.main.bundleIdentifier else { continue }
+            let name = app.localizedName ?? bundleID
+            let playing = live.contains {
+                $0.bundleID == bundleID || $0.responsibleBundleID == bundleID
+                    || $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }
+            found[bundleID] = Candidate(
+                bundleID: bundleID, name: name, icon: app.icon,
+                isRunning: true, isPlaying: playing
+            )
+        }
+
+        for url in Self.installedApplications() {
+            guard let bundle = Bundle(url: url),
+                  let bundleID = bundle.bundleIdentifier,
+                  bundleID != Bundle.main.bundleIdentifier,
+                  found[bundleID] == nil else { continue }
+            found[bundleID] = Candidate(
+                bundleID: bundleID,
+                name: FileManager.default.displayName(atPath: url.path)
+                    .replacingOccurrences(of: ".app", with: ""),
+                icon: NSWorkspace.shared.icon(forFile: url.path),
+                isRunning: false,
+                isPlaying: false
+            )
+        }
+
+        candidateCache = found.values.sorted {
+            // What is already making sound is what you are most likely
+            // reaching for.
+            if $0.isPlaying != $1.isPlaying { return $0.isPlaying }
+            if $0.isRunning != $1.isRunning { return $0.isRunning }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    /// Cheap: filters the cache, nothing else. Safe to call from a view body.
+    func candidates(matching query: String = "") -> [Candidate] {
+        let already = Set(apps.map(\.bundleID))
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        return candidateCache.filter {
+            !already.contains($0.bundleID)
+                && (trimmed.isEmpty || $0.name.localizedCaseInsensitiveContains(trimmed))
+        }
+    }
+
+    /// Scanned once — reading a hundred Info.plists on every keystroke of a
+    /// search field would be felt.
+    private static let installedCache: [URL] = {
+        let manager = FileManager.default
+        var roots = ["/Applications", "/Applications/Utilities", "/System/Applications"]
+        if let home = manager.urls(for: .applicationDirectory, in: .userDomainMask).first {
+            roots.append(home.path)
+        }
+        var found: [URL] = []
+        for root in roots {
+            guard let names = try? manager.contentsOfDirectory(atPath: root) else { continue }
+            for name in names where name.hasSuffix(".app") {
+                found.append(URL(fileURLWithPath: root).appendingPathComponent(name))
+            }
+        }
+        return found
+    }()
+
+    private static func installedApplications() -> [URL] { installedCache }
 
     private func icon(forBundleID bundleID: String) -> NSImage? {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
@@ -454,7 +507,7 @@ final class AppAudioService {
     /// Only apps below 100% are rendered. Each gets its own mixer; the others
     /// are torn down.
     private func rebuildMixer() {
-        let outputUID = SoundService.shared.currentOutputUID
+        let outputUIDs = SoundService.shared.currentOutputDeviceUIDs
         let rendered = taps.keys.filter { needsRendering(settings[$0]) }
 
         for (bundleID, running) in mixers where !rendered.contains(bundleID) {
@@ -463,7 +516,7 @@ final class AppAudioService {
         }
 
         for bundleID in rendered {
-            guard let uid = tapUIDs[bundleID], !outputUID.isEmpty else { continue }
+            guard let uid = tapUIDs[bundleID], !outputUIDs.isEmpty else { continue }
             let wanted = gain(for: settings[bundleID])
 
             // Leave a running mixer alone: creating a tap changes the process
@@ -473,14 +526,14 @@ final class AppAudioService {
             if let running = mixers[bundleID],
                running.isRunning,
                running.tapUID == uid,
-               running.outputUID == outputUID {
+               running.outputUIDs == outputUIDs {
                 running.setGain(wanted)
                 continue
             }
 
             let mixer = mixers[bundleID] ?? AppMixer()
             mixers[bundleID] = mixer
-            if !mixer.start(outputUID: outputUID, tapUID: uid, gain: wanted) {
+            if !mixer.start(outputUIDs: outputUIDs, tapUID: uid, gain: wanted) {
                 lastError = "Couldn't start the mixer for \(settings[bundleID]?.name ?? bundleID)."
                 mixers.removeValue(forKey: bundleID)
             }

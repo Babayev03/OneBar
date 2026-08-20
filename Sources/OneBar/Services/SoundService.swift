@@ -642,10 +642,24 @@ final class SoundService {
         refresh()
     }
 
-    /// The UID of whatever is playing right now — the device `AppMixer` has to
-    /// render into.
+    /// The UID of whatever is playing right now.
     var currentOutputUID: String {
         outputs.first { $0.isDefault }?.uid ?? outputs.first?.uid ?? ""
+    }
+
+    /// The *real* devices behind the current output, which is what `AppMixer`
+    /// has to render into.
+    ///
+    /// One aggregate device cannot contain another — building a mixer over a
+    /// group yields a device with no channels whose start fails outright — so
+    /// a group is expanded into its members here and the mixer mirrors to them
+    /// itself, exactly as the group would have.
+    var currentOutputDeviceUIDs: [String] {
+        guard let device = outputs.first(where: { $0.isDefault }) ?? outputs.first else { return [] }
+        guard device.isGroup, let group = OutputGroupStore.shared.group(withDeviceUID: device.uid) else {
+            return [device.uid]
+        }
+        return group.memberUIDs
     }
 
     /// The volume keys only need taking over while a group is playing —

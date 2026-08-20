@@ -31,7 +31,7 @@ final class AppMixer {
     private var procID: AudioDeviceIOProcID?
 
     private(set) var tapUID = ""
-    private(set) var outputUID = ""
+    private(set) var outputUIDs: [String] = []
 
     init() {
         target = .allocate(capacity: 1)
@@ -59,9 +59,9 @@ final class AppMixer {
     }
 
     @discardableResult
-    func start(outputUID: String, tapUID: String, gain: Float) -> Bool {
+    func start(outputUIDs: [String], tapUID: String, gain: Float) -> Bool {
         stop()
-        guard !outputUID.isEmpty, !tapUID.isEmpty else { return false }
+        guard !outputUIDs.isEmpty, !tapUID.isEmpty else { return false }
 
         target.pointee = max(0, min(gain, 1))
         // From silence, so the app fades in rather than snapping on.
@@ -73,8 +73,14 @@ final class AppMixer {
             // Private: plumbing, not something to offer in a device list.
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: 1,
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputUID]],
+            // Several devices when the output is a group: an aggregate cannot
+            // hold another aggregate, so the group's members are mirrored here
+            // instead. The first keeps time and the rest follow it, as in
+            // `AggregateDevice.create`.
+            kAudioAggregateDeviceMainSubDeviceKey: outputUIDs[0],
+            kAudioAggregateDeviceSubDeviceListKey: outputUIDs.map {
+                [kAudioSubDeviceUIDKey: $0, kAudioSubDeviceDriftCompensationKey: $0 == outputUIDs[0] ? 0 : 1]
+            },
             kAudioAggregateDeviceTapListKey: [
                 [kAudioSubTapUIDKey: tapUID, kAudioSubTapDriftCompensationKey: 1]
             ]
@@ -148,7 +154,7 @@ final class AppMixer {
 
         procID = id
         self.tapUID = tapUID
-        self.outputUID = outputUID
+        self.outputUIDs = outputUIDs
         return true
     }
 
@@ -163,6 +169,6 @@ final class AppMixer {
         procID = nil
         aggregateID = 0
         tapUID = ""
-        outputUID = ""
+        outputUIDs = []
     }
 }
