@@ -193,6 +193,9 @@ final class SoundService {
 
         observeDefaults(output: defaultOutput, input: defaultInput)
         updateVolumeKeyMonitor()
+        // Per-app rendering plays into the current output, so it follows a
+        // change of device.
+        AppAudioService.shared.outputDeviceChanged()
 
         // A meter left running on a device that is no longer the default would
         // be metering the wrong microphone, and holding it open for nothing.
@@ -637,6 +640,12 @@ final class SoundService {
         }
         OutputGroupStore.shared.remove(group.id)
         refresh()
+    }
+
+    /// The UID of whatever is playing right now — the device `AppMixer` has to
+    /// render into.
+    var currentOutputUID: String {
+        outputs.first { $0.isDefault }?.uid ?? outputs.first?.uid ?? ""
     }
 
     /// The volume keys only need taking over while a group is playing —

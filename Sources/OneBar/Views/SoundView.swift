@@ -10,6 +10,8 @@ struct SoundScreen: View {
 
     private enum Page: Equatable {
         case root
+        case apps
+        case addApp
         case newGroup
         case group(UUID)
     }
@@ -22,6 +24,7 @@ struct SoundScreen: View {
     @State private var hovered: String?
 
     private var service: SoundService { SoundService.shared }
+    private var appAudio: AppAudioService { AppAudioService.shared }
     private var state: AppState { AppState.shared }
 
     var body: some View {
@@ -31,6 +34,8 @@ struct SoundScreen: View {
             VStack(spacing: 8) {
                 switch page {
                 case .root: rootPage
+                case .apps: appsPage
+                case .addApp: addAppPage
                 case .newGroup: newGroupPage
                 case .group(let id): groupPage(id)
                 }
@@ -49,7 +54,13 @@ struct SoundScreen: View {
     /// is a few points across and easy to miss.
     private var header: some View {
         Button {
-            if page == .root { back() } else { page = .root }
+            // One layer at a time: Add-an-app goes back to the app list, not
+            // out to the Sound screen.
+            switch page {
+            case .root: back()
+            case .addApp: page = .apps
+            case .apps, .newGroup, .group: page = .root
+            }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left")
@@ -71,6 +82,8 @@ struct SoundScreen: View {
     private var title: String {
         switch page {
         case .root: return "Sound"
+        case .apps: return "App volumes"
+        case .addApp: return "Add an app"
         case .newGroup: return "New group"
         case .group(let id):
             return OutputGroupStore.shared.groups.first { $0.id == id }?.name ?? "Group"
@@ -98,11 +111,29 @@ struct SoundScreen: View {
                     meter: state.soundInputMeterEnabled
                 )
             }
-            // Last: a group is something you set up once and then forget,
-            // unlike the two selects above it.
+            // Last: neither of these is a thing you touch often, unlike the
+            // two selects above them.
             if !service.outputs.isEmpty {
-                groupsCard
+                extrasCard
             }
+        }
+    }
+
+    private var extrasCard: some View {
+        VStack(spacing: 6) {
+            card {
+                row(
+                    "App volumes",
+                    id: "apps",
+                    trailing: "chevron.right",
+                    detail: appAudio.adjustedCount > 0 ? "\(appAudio.adjustedCount)" : nil
+                ) {
+                    appAudio.refresh()
+                    page = .apps
+                }
+            }
+
+            groupsCard
         }
     }
 
@@ -137,6 +168,188 @@ struct SoundScreen: View {
                 }
             }
         }
+    }
+
+    // MARK: - Per-app volumes
+
+    @ViewBuilder
+    private var appsPage: some View {
+        if let error = appAudio.lastError {
+            card {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(error)
+                        .font(.system(size: 11))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("macOS calls reading an app's audio \"recording\" — it is played straight back out at the level you picked, and nothing is stored or sent anywhere.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+        }
+
+        card {
+            ForEach(Array(appAudio.apps.enumerated()), id: \.element.id) { index, app in
+                if index > 0 { divider }
+                appRow(app)
+            }
+
+            if !appAudio.apps.isEmpty { divider }
+
+            row("Add an app…", id: "addapp", leading: "plus") {
+                page = .addApp
+            }
+        }
+
+        // Diagnostics, off by default — developer language, not for everyday
+        // use. Uncomment to see, per app, whether a tap exists and whether its
+        // render loop is being pumped ("Music: tapped, 4211 renders"). A
+        // render count that climbs is healthy; one stuck at zero means the
+        // loop never runs, which is the failure that is otherwise
+        // indistinguishable from "the slider does nothing".
+        //
+        // if !appAudio.status.isEmpty {
+        //     Text(appAudio.status)
+        //         .font(.system(size: 9).monospaced())
+        //         .foregroundStyle(.secondary)
+        //         .fixedSize(horizontal: false, vertical: true)
+        //         .padding(.horizontal, 4)
+        // }
+
+        Text("Apps on this list play through OneBar, even at 100% — that is what keeps level changes silent instead of clicking. Anything not listed is untouched; remove one with ✕ to take OneBar back out of its audio.")
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+    }
+
+    /// Every running app, so a level can be set before the app ever plays.
+    private var addAppPage: some View {
+        let candidates = appAudio.addableApps
+        return Group {
+            if candidates.isEmpty {
+                Text("Every running app is already listed.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            } else {
+                card {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(candidates, id: \.bundleID) { candidate in
+                                Button {
+                                    appAudio.add(bundleID: candidate.bundleID, name: candidate.name)
+                                    page = .apps
+                                } label: {
+                                    HStack(spacing: 7) {
+                                        if let icon = candidate.icon {
+                                            Image(nsImage: icon)
+                                                .resizable()
+                                                .frame(width: 15, height: 15)
+                                        }
+                                        Text(candidate.name)
+                                            .font(.system(size: 13))
+                                            .lineLimit(1)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .fill(state.accentColor.opacity(hovered == candidate.bundleID ? 0.85 : 0))
+                                    )
+                                    .foregroundStyle(hovered == candidate.bundleID
+                                                     ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 4)
+                                .onHover { inside in
+                                    hovered = inside ? candidate.bundleID
+                                        : (hovered == candidate.bundleID ? nil : hovered)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 280)
+                }
+            }
+        }
+    }
+
+    private func appRow(_ app: AppAudioService.App) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 7) {
+                if let icon = app.icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 15, height: 15)
+                }
+
+                Text(app.name)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Text(app.isMuted ? "muted" : "\(Int((app.volume * 100).rounded()))%")
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    appAudio.toggleMute(for: app.bundleID)
+                } label: {
+                    Image(systemName: app.isMuted ? "speaker.slash.fill" : "speaker.fill")
+                        .font(.system(size: 10))
+                        .frame(width: 14)
+                        .foregroundStyle(app.isMuted ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Slider(
+                    value: Binding(
+                        get: {
+                            // Read back out of the service so a drag keeps
+                            // moving after the first change re-renders the row.
+                            appAudio.apps.first { $0.bundleID == app.bundleID }?.volume ?? app.volume
+                        },
+                        set: { appAudio.setVolume($0, for: app.bundleID) }
+                    ),
+                    in: 0...1
+                )
+                .controlSize(.small)
+                .disabled(app.isMuted)
+
+                Button {
+                    appAudio.remove(app.bundleID)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !app.isRunning {
+                Text("Not running")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            } else if !app.isPlaying {
+                Text("Not playing right now")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Creating a group
@@ -293,6 +506,7 @@ struct SoundScreen: View {
         id: String,
         leading: String? = nil,
         trailing: String? = nil,
+        detail: String? = nil,
         destructive: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
@@ -308,6 +522,12 @@ struct SoundScreen: View {
                     .lineLimit(1)
 
                 Spacer()
+
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(hovered == id ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                }
 
                 if let trailing {
                     Image(systemName: trailing)

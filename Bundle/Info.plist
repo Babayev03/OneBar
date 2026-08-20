@@ -26,6 +26,8 @@
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>OneBar sets the volume of individual apps. macOS calls reading an app's audio "recording", which is why it asks — the audio is only played straight back out at the level you picked, and nothing is stored or sent anywhere.</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
 	<key>NSDocumentsFolderUsageDescription</key>

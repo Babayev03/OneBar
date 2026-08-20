@@ -76,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         BrightnessService.shared.start()
         SoundService.shared.start()
+        AppAudioService.shared.start()
         HotkeyManager.shared.registerFromStore()
     }
 
@@ -92,6 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClickCanvasController.shared.close()
         BrightnessService.shared.restoreDimming()
         SoundService.shared.tearDown()
+        // Taps mute the apps they are on, so leaving one behind would leave an
+        // app silent with nothing left to un-silence it.
+        AppAudioService.shared.tearDown()
         ClipboardManager.shared.saveNow()
     }
 }
