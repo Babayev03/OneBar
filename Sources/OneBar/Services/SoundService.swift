@@ -32,6 +32,11 @@ final class SoundService {
         case main
         /// Per-channel scalars only — no main element to write.
         case channels([AudioObjectPropertyElement])
+        /// An output group. The aggregate device the HAL builds has no volume
+        /// control of its own — this is the long-standing complaint about
+        /// macOS multi-output devices, that the volume keys stop working — so
+        /// the level is fanned out to the members instead.
+        case group([AudioObjectID])
         /// HDMI, DisplayPort, most USB DACs, some AirPlay, and the Continuity
         /// iPhone microphone. The device runs at whatever level its own
         /// hardware is set to and nothing here can move it.
@@ -41,6 +46,8 @@ final class SoundService {
     enum MuteControl: Equatable {
         case main
         case channels([AudioObjectPropertyElement])
+        /// Fanned out to the group's members, like `VolumeControl.group`.
+        case group([AudioObjectID])
         case none
     }
 
@@ -62,6 +69,7 @@ final class SoundService {
 
         var isAdjustable: Bool { volumeControl != .none }
         var canMute: Bool { muteControl != .none }
+        var isGroup: Bool { AggregateDevice.isOurs(uid) }
     }
 
     private(set) var outputs: [Device] = []
@@ -88,6 +96,14 @@ final class SoundService {
     /// The value and the moment of our own last write, for telling our echo
     /// apart from a real change. See `shouldIgnoreEcho`.
     @ObservationIgnored private var lastWrite: (value: Double, at: Date)?
+
+    /// Each plain device's own controls, so a group can drive its members
+    /// without re-probing every one of them on every tick of a slider drag.
+    @ObservationIgnored private var memberControls: [AudioObjectID: (VolumeControl, MuteControl)] = [:]
+    @ObservationIgnored private var deviceIDsByUID: [String: AudioObjectID] = [:]
+    /// Creating or destroying an aggregate device fires the device-list
+    /// listener, which would call straight back into here.
+    @ObservationIgnored private var reconciling = false
 
     @ObservationIgnored private let meter = InputMeter()
     @ObservationIgnored private var meterTimer: Timer?
@@ -141,12 +157,31 @@ final class SoundService {
             return
         }
 
+        reconcileGroups()
+
         let defaultOutput = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
         let defaultInput = defaultDevice(kAudioHardwarePropertyDefaultInputDevice)
         let ids = CoreAudioProperty.objectIDs(
             AudioObjectID(kAudioObjectSystemObject),
             CoreAudioProperty.address(kAudioHardwarePropertyDevices)
         )
+
+        // A group's members are ordinary devices, so their controls have to be
+        // known before any group can be described in terms of them.
+        deviceIDsByUID = [:]
+        memberControls = [:]
+        for id in ids {
+            guard let uid = CoreAudioProperty.string(
+                id,
+                CoreAudioProperty.address(kAudioDevicePropertyDeviceUID)
+            ) else { continue }
+            deviceIDsByUID[uid] = id
+            guard !AggregateDevice.isOurs(uid) else { continue }
+            memberControls[id] = (
+                volumeControl(for: id, scope: kAudioObjectPropertyScopeOutput),
+                muteControl(for: id, scope: kAudioObjectPropertyScopeOutput)
+            )
+        }
 
         outputs = ids.compactMap {
             device(id: $0, scope: kAudioObjectPropertyScopeOutput, isDefault: $0 == defaultOutput)
@@ -208,8 +243,20 @@ final class SoundService {
             CoreAudioProperty.address(kAudioObjectPropertyName)
         ) ?? "Audio Device"
 
-        let volumeControl = volumeControl(for: id, scope: scope)
-        let muteControl = muteControl(for: id, scope: scope)
+        var volumeControl = volumeControl(for: id, scope: scope)
+        var muteControl = muteControl(for: id, scope: scope)
+
+        // A group reports no controls at all; it borrows its members'.
+        if AggregateDevice.isOurs(uid), scope == kAudioObjectPropertyScopeOutput {
+            let memberIDs = OutputGroupStore.shared.group(withDeviceUID: uid)?
+                .memberUIDs.compactMap { deviceIDsByUID[$0] } ?? []
+            if !memberIDs.isEmpty {
+                volumeControl = .group(memberIDs)
+                muteControl = memberIDs.contains { memberControls[$0]?.1 != MuteControl.none }
+                    ? .group(memberIDs)
+                    : .none
+            }
+        }
 
         return Device(
             id: id,
@@ -308,6 +355,14 @@ final class SoundService {
                 scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope, element: $0)
             }
             return values.max()
+        case .group(let memberIDs):
+            // The loudest member is the group's level, the same way the loudest
+            // channel is a device's.
+            let values = memberIDs.compactMap { member -> Double? in
+                guard let control = memberControls[member]?.0 else { return nil }
+                return readVolume(member, scope: scope, control: control)
+            }
+            return values.max()
         case .none:
             return nil
         }
@@ -334,6 +389,15 @@ final class SoundService {
                     seed: UInt32(0)
                 ) == 1
             }
+        case .group(let memberIDs):
+            // Muted only when every member that *can* mute is muted — one
+            // member without a mute control would otherwise make the group
+            // permanently unmuted.
+            let mutable = memberIDs.filter { memberControls[$0]?.1 != MuteControl.none }
+            return !mutable.isEmpty && mutable.allSatisfy { member in
+                guard let control = memberControls[member]?.1 else { return false }
+                return readMute(member, scope: scope, control: control)
+            }
         case .none:
             return false
         }
@@ -359,28 +423,11 @@ final class SoundService {
         let clamped = min(max(value, 0), 1)
         let control = self[list][index].volumeControl
 
+        guard control != .none else { return }
+
         self[list][index].volume = clamped
         lastWrite = (clamped, Date())
-
-        switch control {
-        case .virtualMain:
-            write(clamped, id, kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: scope)
-        case .main:
-            write(clamped, id, kAudioDevicePropertyVolumeScalar, scope: scope)
-        case .channels(let elements):
-            // Scale each channel by its ratio to the loudest one, so a channel
-            // the user pulled down stays proportionally down.
-            let current = elements.map {
-                scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope, element: $0) ?? 0
-            }
-            let peak = current.max() ?? 0
-            for (element, level) in zip(elements, current) {
-                let ratio = peak > 0.001 ? level / peak : 1
-                write(clamped * ratio, id, kAudioDevicePropertyVolumeScalar, scope: scope, element: element)
-            }
-        case .none:
-            return
-        }
+        writeVolume(clamped, to: id, scope: scope, control: control)
 
         // Control Center's own behaviour: turning it up is how you unmute.
         if clamped > 0, self[list][index].isMuted {
@@ -390,27 +437,10 @@ final class SoundService {
 
     func setMuted(_ muted: Bool, for id: AudioObjectID, scope: AudioObjectPropertyScope) {
         guard let (list, index) = locate(id, scope: scope) else { return }
-        let value = UInt32(muted ? 1 : 0)
+        let control = self[list][index].muteControl
+        guard control != .none else { return }
 
-        switch self[list][index].muteControl {
-        case .main:
-            CoreAudioProperty.setValue(
-                id,
-                CoreAudioProperty.address(kAudioDevicePropertyMute, scope: scope),
-                value
-            )
-        case .channels(let elements):
-            for element in elements {
-                CoreAudioProperty.setValue(
-                    id,
-                    CoreAudioProperty.address(kAudioDevicePropertyMute, scope: scope, element: element),
-                    value
-                )
-            }
-        case .none:
-            return
-        }
-
+        writeMute(muted, to: id, scope: scope, control: control)
         self[list][index].isMuted = muted
     }
 
@@ -458,6 +488,80 @@ final class SoundService {
         refresh()
     }
 
+    /// Sends one level to whichever control a device actually has. A group
+    /// recurses into its members exactly once — a member is always a plain
+    /// device, never a group of its own.
+    private func writeVolume(
+        _ value: Double,
+        to id: AudioObjectID,
+        scope: AudioObjectPropertyScope,
+        control: VolumeControl
+    ) {
+        switch control {
+        case .virtualMain:
+            write(value, id, kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: scope)
+        case .main:
+            write(value, id, kAudioDevicePropertyVolumeScalar, scope: scope)
+        case .channels(let elements):
+            // Scale each channel by its ratio to the loudest one, so a channel
+            // the user pulled down stays proportionally down.
+            let current = elements.map {
+                scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope, element: $0) ?? 0
+            }
+            let peak = current.max() ?? 0
+            for (element, level) in zip(elements, current) {
+                let ratio = peak > 0.001 ? level / peak : 1
+                write(value * ratio, id, kAudioDevicePropertyVolumeScalar, scope: scope, element: element)
+            }
+        case .group(let memberIDs):
+            for member in memberIDs {
+                guard let memberControl = memberControls[member]?.0 else { continue }
+                writeVolume(value, to: member, scope: scope, control: memberControl)
+                // A member muted on its own stays silent while the group looks
+                // perfectly fine — the group only reads as muted when *every*
+                // member is. Raising the level clears it, the same way it does
+                // on a single device.
+                if value > 0, let muteControl = memberControls[member]?.1, muteControl != .none {
+                    writeMute(false, to: member, scope: scope, control: muteControl)
+                }
+            }
+        case .none:
+            break
+        }
+    }
+
+    private func writeMute(
+        _ muted: Bool,
+        to id: AudioObjectID,
+        scope: AudioObjectPropertyScope,
+        control: MuteControl
+    ) {
+        let value = UInt32(muted ? 1 : 0)
+        switch control {
+        case .main:
+            CoreAudioProperty.setValue(
+                id,
+                CoreAudioProperty.address(kAudioDevicePropertyMute, scope: scope),
+                value
+            )
+        case .channels(let elements):
+            for element in elements {
+                CoreAudioProperty.setValue(
+                    id,
+                    CoreAudioProperty.address(kAudioDevicePropertyMute, scope: scope, element: element),
+                    value
+                )
+            }
+        case .group(let memberIDs):
+            for member in memberIDs {
+                guard let memberControl = memberControls[member]?.1 else { continue }
+                writeMute(muted, to: member, scope: scope, control: memberControl)
+            }
+        case .none:
+            break
+        }
+    }
+
     private func write(
         _ value: Double,
         _ id: AudioObjectID,
@@ -472,6 +576,94 @@ final class SoundService {
             CoreAudioProperty.address(selector, scope: scope, element: element),
             Float32(min(max(value, 0), 1))
         )
+    }
+
+    // MARK: - Output groups
+
+    /// Devices that may join a group: everything already listed for output,
+    /// minus the groups themselves.
+    ///
+    /// The filter matters more than it looks. An aggregate device inherits
+    /// `canBeDefaultDevice` from its members, so a single member that cannot be
+    /// a default device produces a group that is missing from every device list
+    /// with no error to explain it. `outputs` is already filtered on exactly
+    /// that property, so drawing candidates from it is what keeps groups
+    /// selectable.
+    var groupCandidates: [Device] {
+        outputs.filter { !$0.isGroup }
+    }
+
+    /// The definition behind a listed group device, for renaming or deleting.
+    func group(for device: Device) -> OutputGroup? {
+        OutputGroupStore.shared.group(withDeviceUID: device.uid)
+    }
+
+    /// Members in the order they were picked; the first is the clock master.
+    func memberNames(of group: OutputGroup) -> [String] {
+        group.memberUIDs.map { uid in
+            guard let id = deviceIDsByUID[uid] else { return "Not connected" }
+            return outputs.first { $0.id == id }?.name
+                ?? CoreAudioProperty.string(id, CoreAudioProperty.address(kAudioObjectPropertyName))
+                ?? "Audio Device"
+        }
+    }
+
+    @discardableResult
+    func createGroup(name: String, memberUIDs: [String]) -> Bool {
+        guard let group = OutputGroupStore.shared.add(name: name, memberUIDs: memberUIDs) else {
+            return false
+        }
+        guard AggregateDevice.create(group) != 0 else {
+            // Don't keep a definition the HAL refused — it would be rebuilt and
+            // refused again on every launch.
+            OutputGroupStore.shared.remove(group.id)
+            return false
+        }
+        refresh()
+        return true
+    }
+
+    func deleteGroup(_ group: OutputGroup) {
+        // If the group is what is currently playing, move back to a real device
+        // first: destroying the default output leaves the HAL to pick for us.
+        if let device = outputs.first(where: { $0.uid == group.deviceUID }), device.isDefault,
+           let fallback = groupCandidates.first {
+            makeDefault(fallback.id, scope: kAudioObjectPropertyScopeOutput)
+        }
+        if let id = AggregateDevice.existing()[group.deviceUID] {
+            AggregateDevice.destroy(id)
+        }
+        OutputGroupStore.shared.remove(group.id)
+        refresh()
+    }
+
+    /// Rebuilds any group the HAL has lost and destroys any aggregate device of
+    /// ours that no definition claims — a stray left by a crash, say.
+    private func reconcileGroups() {
+        guard !reconciling else { return }
+        reconciling = true
+        defer { reconciling = false }
+
+        let existing = AggregateDevice.existing()
+        let wanted = OutputGroupStore.shared.groups
+
+        for group in wanted {
+            guard let id = existing[group.deviceUID] else {
+                AggregateDevice.create(group)
+                continue
+            }
+            // Self-heal a group built by an older version in the wrong mode —
+            // it would otherwise play to its first member only, forever.
+            if !AggregateDevice.isMirrored(id) {
+                AggregateDevice.destroy(id)
+                AggregateDevice.create(group)
+            }
+        }
+
+        let wantedUIDs = Set(wanted.map(\.deviceUID))
+        for (uid, id) in existing where !wantedUIDs.contains(uid) {
+            AggregateDevice.destroy(id)
+        }
     }
 
     // MARK: - The two lists as one
