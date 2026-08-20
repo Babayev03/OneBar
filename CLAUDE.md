@@ -16,7 +16,9 @@ swift build -c release      # release build
 ./build-app.sh              # release build → assemble dist/OneBar.app → ad-hoc sign → install to /Applications → relaunch
 ```
 
-`build-app.sh` is the only way to actually *run* the app: the binary needs the `Bundle/Info.plist` (`LSUIElement`, bundle ID `com.ilham.onebar`) to behave as a menubar accessory. The bundle ID is deliberately stable so the Accessibility/TCC grant survives rebuilds — do not change it casually or the user must re-grant permissions.
+`build-app.sh` is the only way to actually *run* the app: the binary needs the `Bundle/Info.plist` (`LSUIElement`, bundle ID `com.onebar.app`) to behave as a menubar accessory.
+
+The script signs ad-hoc but passes an explicit `-r='designated => identifier "..."'`. Without it codesign derives a designated requirement that pins the cdhash, which changes on every build — TCC then fails the app's Accessibility check while System Settings still shows the toggle on, so the permission-gated features die silently and `AXIsProcessTrustedWithOptions` won't even re-prompt (the stale row already exists, and the prompt only appears when there is none). Naming the bundle ID keeps the requirement identical across rebuilds, so the grant survives. The bundle ID is read out of `Info.plist` rather than repeated in the script; changing it still costs a one-time `tccutil reset Accessibility <id>` plus a re-grant, and moves the `UserDefaults` domain.
 
 Regenerating the icon (rarely needed):
 

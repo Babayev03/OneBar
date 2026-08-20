@@ -4,17 +4,17 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>OneBar</string>
 	<key>CFBundleExecutable</key>
 	<string>OneBar</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.ilham.onebar</string>
+	<string>com.onebar.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>OneBar</string>
-	<key>CFBundleDisplayName</key>
 	<string>OneBar</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -22,16 +22,16 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>NSDownloadsFolderUsageDescription</key>
-	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
-	<key>NSDesktopFolderUsageDescription</key>
-	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
-	<key>NSDocumentsFolderUsageDescription</key>
-	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSSupportsAutomaticTermination</key>
