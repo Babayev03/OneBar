@@ -34,6 +34,8 @@
 	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>OneBar shows a live input level for the microphone you pick. The microphone is opened only while the Sound screen is on screen with the level meter turned on, and nothing is recorded or sent anywhere.</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

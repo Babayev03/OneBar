@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SystemStatsService.shared.start()
         }
         BrightnessService.shared.start()
+        SoundService.shared.start()
         HotkeyManager.shared.registerFromStore()
     }
 
@@ -90,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TurboClickService.shared.stop()
         ClickCanvasController.shared.close()
         BrightnessService.shared.restoreDimming()
+        SoundService.shared.tearDown()
         ClipboardManager.shared.saveNow()
     }
 }
