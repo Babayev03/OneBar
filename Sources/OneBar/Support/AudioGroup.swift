@@ -112,7 +112,11 @@ enum AggregateDevice {
             AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, $0)
         }) == noErr, let dictionary = composition?.takeRetainedValue() as? [String: Any] else { return true }
 
-        guard let stacked = dictionary[kAudioAggregateDeviceIsStackedKey] as? Int else { return false }
+        // Anything unreadable is treated as fine. Answering "not mirrored"
+        // here means destroying and recreating the device, and doing that to a
+        // group that is currently playing is far worse than leaving a
+        // suspicious one alone.
+        guard let stacked = dictionary[kAudioAggregateDeviceIsStackedKey] as? Int else { return true }
         return stacked == 1
     }
 

@@ -373,7 +373,7 @@ final class AppAudioService {
             setting.name = name
         }
 
-        let wasRendering = needsRendering(settings[setting.bundleID]) && mixers[setting.bundleID]?.isRunning == true
+        let wasNeeded = needsRendering(settings[setting.bundleID])
         settings[setting.bundleID] = setting
         // Touching a row is how it gets remembered — but only if it is a real
         // app, or a stray daemon row would be saved right back.
@@ -387,10 +387,16 @@ final class AppAudioService {
             apps[index].isMuted = setting.isMuted
         }
 
-        // A level change on an app already being rendered is only a gain — it
-        // must not tear the stream down under a moving slider.
-        if wasRendering, needsRendering(setting), let running = mixers[setting.bundleID] {
-            running.setGain(gain(for: setting))
+        // A level change that does not change *whether* the app is routed
+        // through OneBar has no tap to build and none to drop, so it must not
+        // pay for a refresh: enumerating the HAL's process list and resolving
+        // each one to an app costs ~4ms, which at slider rate is most of a
+        // frame. Only crossing the line — 100% and unmuted, or not — is a
+        // change to the plumbing.
+        if wasNeeded == needsRendering(setting) {
+            // Nil while a turned-down app is not playing; it picks the level
+            // up when the process listener starts one.
+            mixers[setting.bundleID]?.setGain(gain(for: setting))
             return
         }
 
@@ -407,16 +413,16 @@ final class AppAudioService {
     /// at all, so nothing enforced the mute. Muting is now simply a gain of
     /// zero through the same path as every other level.
     ///
-    /// Note this is true for a managed app **even at 100%**. Taking the tap
-    /// away at 100% and putting it back at 99% is a click every time you cross
-    /// that line: the app's own output is cut and ours takes over, and no
-    /// amount of ramping hides the handover. Holding the route open for as
-    /// long as the app is on the list costs one handover when you add it, and
-    /// none afterwards. An app that is *not* on the list is untouched, which
-    /// is still the promise that matters.
+    /// **Only apps actually turned down or muted.** Holding the route open for
+    /// every listed app was tried, to avoid the click when crossing 100%, and
+    /// it cost far more than it saved: a running mixer keeps OneBar in the
+    /// audio graph, and while one existed the output device could not be
+    /// changed at all — an app sitting untouched at 100% silently disabled the
+    /// output select. A click when you first turn something down is a much
+    /// smaller price than that.
     private func needsRendering(_ setting: AppAudioSetting?) -> Bool {
         guard let setting else { return false }
-        return pinned.contains(setting.bundleID)
+        return !setting.isDefault
     }
 
     private func gain(for setting: AppAudioSetting?) -> Float {
@@ -426,7 +432,7 @@ final class AppAudioService {
 
     private func syncTaps(live: [AudioProcess.Info]) {
         var wanted: [String: [AudioObjectID]] = [:]
-        for setting in settings.values where pinned.contains(setting.bundleID) {
+        for setting in settings.values where !setting.isDefault {
             let ids = processes(for: setting, live: live)
             if !ids.isEmpty { wanted[setting.bundleID] = ids }
         }
@@ -540,14 +546,45 @@ final class AppAudioService {
         }
     }
 
-    /// The output device changed under us, so the mixer has to play into the
-    /// new one.
-    /// The output device changed under us, so every mixer has to play into the
-    /// new one.
+    /// Called on every one of `SoundService`'s refreshes, which is why it has
+    /// to decide for itself whether the device really changed.
+    ///
+    /// When it did, let go of the old device *first* and rebuild a moment
+    /// later: tearing an aggregate down and standing a new one up inside the
+    /// same instant the system is re-pointing its default is what let a running
+    /// mixer fight the switch.
+    ///
+    /// When it did not, rebuild in place — `rebuildMixer` leaves a matching
+    /// running mixer alone. Stepping out unconditionally here was a loop with
+    /// no exit: starting a mixer creates an aggregate device, that fires the
+    /// device-list listener, `SoundService.refresh()` lands back here and stops
+    /// the mixer it just started. The level looked dead because every mixer was
+    /// torn down 700ms after it began, forever.
     func outputDeviceChanged() {
-        guard !mixers.isEmpty else { return }
-        rebuildMixer()
+        let current = SoundService.shared.currentOutputDeviceUIDs
+        let changed = current != lastOutputUIDs
+        lastOutputUIDs = current
+
+        guard changed, !mixers.isEmpty else {
+            rebuildMixer()
+            return
+        }
+
+        for (_, running) in mixers { running.stop() }
+        mixers = [:]
+
+        rebuildTask?.cancel()
+        rebuildTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            rebuildMixer()
+        }
     }
+
+    /// What the mixers are currently playing into, so a refresh that changed
+    /// nothing can be told apart from a real switch.
+    @ObservationIgnored private var lastOutputUIDs: [String] = []
+    @ObservationIgnored private var rebuildTask: Task<Void, Never>?
 
     private func write() {
         var list: [AppAudioSetting] = []

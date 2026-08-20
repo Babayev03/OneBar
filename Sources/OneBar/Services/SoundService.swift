@@ -24,7 +24,7 @@ final class SoundService {
     /// Where a device's volume knob actually lives. "Has a volume control" is a
     /// property of a (selector, scope, element) triple, not of a device, so
     /// this is probed per device rather than assumed.
-    enum VolumeControl: Equatable {
+    enum VolumeControl: Equatable, Sendable {
         /// What Control Center drives. Synthetic, and it preserves the balance
         /// between channels for free.
         case virtualMain
@@ -43,7 +43,7 @@ final class SoundService {
         case none
     }
 
-    enum MuteControl: Equatable {
+    enum MuteControl: Equatable, Sendable {
         case main
         case channels([AudioObjectPropertyElement])
         /// Fanned out to the group's members, like `VolumeControl.group`.
@@ -96,6 +96,16 @@ final class SoundService {
     /// The value and the moment of our own last write, for telling our echo
     /// apart from a real change. See `shouldIgnoreEcho`.
     @ObservationIgnored private var lastWrite: (value: Double, at: Date)?
+
+    /// Writes waiting to go down to the HAL, newest value per control only.
+    @ObservationIgnored private var pending: [Target: PendingWrite] = [:]
+    @ObservationIgnored private var draining = false
+    /// Separate from `queue`, which delivers HAL notifications: a slow write
+    /// must not hold up the echo of the one before it.
+    @ObservationIgnored private let writeQueue = DispatchQueue(
+        label: "com.onebar.app.sound.write",
+        qos: .userInitiated
+    )
 
     /// Each plain device's own controls, so a group can drive its members
     /// without re-probing every one of them on every tick of a slider drag.
@@ -350,14 +360,14 @@ final class SoundService {
     ) -> Double? {
         switch control {
         case .virtualMain:
-            return scalar(id, kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: scope)
+            return Self.scalar(id, kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: scope)
         case .main:
-            return scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope)
+            return Self.scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope)
         case .channels(let elements):
             // The loudest channel is the level; a channel deliberately pulled
             // down is balance, not volume.
             let values = elements.compactMap {
-                scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope, element: $0)
+                Self.scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope, element: $0)
             }
             return values.max()
         case .group(let memberIDs):
@@ -408,7 +418,7 @@ final class SoundService {
         }
     }
 
-    private func scalar(
+    nonisolated private static func scalar(
         _ id: AudioObjectID,
         _ selector: AudioObjectPropertySelector,
         scope: AudioObjectPropertyScope,
@@ -432,12 +442,23 @@ final class SoundService {
 
         self[list][index].volume = clamped
         lastWrite = (clamped, Date())
-        writeVolume(clamped, to: id, scope: scope, control: control)
+
+        var job = pending[Target(id: id, scope: scope)] ?? PendingWrite()
+        job.volume = clamped
+        job.volumeControl = control
 
         // Control Center's own behaviour: turning it up is how you unmute.
         if clamped > 0, self[list][index].isMuted {
-            setMuted(false, for: id, scope: scope)
+            let muteControl = self[list][index].muteControl
+            if muteControl != .none {
+                self[list][index].isMuted = false
+                job.mute = false
+                job.muteControl = muteControl
+            }
         }
+
+        pending[Target(id: id, scope: scope)] = job
+        drain()
     }
 
     func setMuted(_ muted: Bool, for id: AudioObjectID, scope: AudioObjectPropertyScope) {
@@ -445,8 +466,13 @@ final class SoundService {
         let control = self[list][index].muteControl
         guard control != .none else { return }
 
-        writeMute(muted, to: id, scope: scope, control: control)
         self[list][index].isMuted = muted
+
+        var job = pending[Target(id: id, scope: scope)] ?? PendingWrite()
+        job.mute = muted
+        job.muteControl = control
+        pending[Target(id: id, scope: scope)] = job
+        drain()
     }
 
     func toggleMute(for id: AudioObjectID, scope: AudioObjectPropertyScope) {
@@ -493,14 +519,82 @@ final class SoundService {
         refresh()
     }
 
+    /// A HAL write is *not* the free thing the top of this file once claimed.
+    /// Measured on the main thread it is ~5ms to the built-in speakers, ~11ms
+    /// to AirPods and ~17ms to a virtual driver, against a 16ms frame — so a
+    /// slider drag posting one per tick stalled the UI outright, and a group
+    /// multiplied that by its member count. The writes therefore go off the
+    /// main actor, latest-wins: `pending` never holds more than the newest
+    /// value per control, so letting go of a slider leaves no backlog still
+    /// draining into the device.
+    ///
+    /// This is `BrightnessService`'s coalescer with the timing turned around.
+    /// There the point is that an I2C exchange *sleeps* for tens of
+    /// milliseconds; here the point is only that the main thread must not be
+    /// the one waiting. There is still no ramp to wait out and no lock.
+    private struct Target: Hashable {
+        let id: AudioObjectID
+        let scope: AudioObjectPropertyScope
+    }
+
+    private struct PendingWrite {
+        var volume: Double?
+        var volumeControl: VolumeControl = .none
+        var mute: Bool?
+        var muteControl: MuteControl = .none
+    }
+
+    private func drain() {
+        guard !draining else { return }
+        draining = true
+
+        Task { @MainActor in
+            while let target = pending.keys.first {
+                guard let job = pending.removeValue(forKey: target) else { continue }
+                // Snapshotted per write, not once for the whole drain: a
+                // device can appear or vanish mid-drag.
+                let members = memberControls
+
+                await withCheckedContinuation { continuation in
+                    writeQueue.async {
+                        if let volume = job.volume {
+                            Self.writeVolume(
+                                volume, to: target.id, scope: target.scope,
+                                control: job.volumeControl, members: members
+                            )
+                        }
+                        if let mute = job.mute {
+                            Self.writeMute(
+                                mute, to: target.id, scope: target.scope,
+                                control: job.muteControl, members: members
+                            )
+                        }
+                        continuation.resume()
+                    }
+                }
+
+                // The echo comes back once the write has actually landed, so
+                // the window that recognises it has to be measured from there
+                // rather than from the moment the slider moved.
+                if let volume = job.volume { lastWrite = (volume, Date()) }
+            }
+            draining = false
+        }
+    }
+
     /// Sends one level to whichever control a device actually has. A group
     /// recurses into its members exactly once — a member is always a plain
     /// device, never a group of its own.
-    private func writeVolume(
+    ///
+    /// `static` and off the main actor because the write queue is what calls
+    /// it, so the member controls arrive as a snapshot rather than being read
+    /// from `memberControls` here.
+    nonisolated private static func writeVolume(
         _ value: Double,
         to id: AudioObjectID,
         scope: AudioObjectPropertyScope,
-        control: VolumeControl
+        control: VolumeControl,
+        members: [AudioObjectID: (VolumeControl, MuteControl)]
     ) {
         switch control {
         case .virtualMain:
@@ -511,7 +605,7 @@ final class SoundService {
             // Scale each channel by its ratio to the loudest one, so a channel
             // the user pulled down stays proportionally down.
             let current = elements.map {
-                scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope, element: $0) ?? 0
+                Self.scalar(id, kAudioDevicePropertyVolumeScalar, scope: scope, element: $0) ?? 0
             }
             let peak = current.max() ?? 0
             for (element, level) in zip(elements, current) {
@@ -520,14 +614,14 @@ final class SoundService {
             }
         case .group(let memberIDs):
             for member in memberIDs {
-                guard let memberControl = memberControls[member]?.0 else { continue }
-                writeVolume(value, to: member, scope: scope, control: memberControl)
+                guard let memberControl = members[member]?.0 else { continue }
+                writeVolume(value, to: member, scope: scope, control: memberControl, members: members)
                 // A member muted on its own stays silent while the group looks
                 // perfectly fine — the group only reads as muted when *every*
                 // member is. Raising the level clears it, the same way it does
                 // on a single device.
-                if value > 0, let muteControl = memberControls[member]?.1, muteControl != .none {
-                    writeMute(false, to: member, scope: scope, control: muteControl)
+                if value > 0, let muteControl = members[member]?.1, muteControl != .none {
+                    writeMute(false, to: member, scope: scope, control: muteControl, members: members)
                 }
             }
         case .none:
@@ -535,11 +629,12 @@ final class SoundService {
         }
     }
 
-    private func writeMute(
+    nonisolated private static func writeMute(
         _ muted: Bool,
         to id: AudioObjectID,
         scope: AudioObjectPropertyScope,
-        control: MuteControl
+        control: MuteControl,
+        members: [AudioObjectID: (VolumeControl, MuteControl)]
     ) {
         let value = UInt32(muted ? 1 : 0)
         switch control {
@@ -559,15 +654,15 @@ final class SoundService {
             }
         case .group(let memberIDs):
             for member in memberIDs {
-                guard let memberControl = memberControls[member]?.1 else { continue }
-                writeMute(muted, to: member, scope: scope, control: memberControl)
+                guard let memberControl = members[member]?.1 else { continue }
+                writeMute(muted, to: member, scope: scope, control: memberControl, members: members)
             }
         case .none:
             break
         }
     }
 
-    private func write(
+    nonisolated private static func write(
         _ value: Double,
         _ id: AudioObjectID,
         _ selector: AudioObjectPropertySelector,
@@ -629,11 +724,15 @@ final class SoundService {
     }
 
     func deleteGroup(_ group: OutputGroup) {
-        // If the group is what is currently playing, move back to a real device
-        // first: destroying the default output leaves the HAL to pick for us.
-        if let device = outputs.first(where: { $0.uid == group.deviceUID }), device.isDefault,
-           let fallback = groupCandidates.first {
-            makeDefault(fallback.id, scope: kAudioObjectPropertyScopeOutput)
+        // If the group is what is currently playing, move somewhere sensible
+        // first: destroying the default output leaves the HAL to pick for us,
+        // and it does not pick what you would. The group's own clock member is
+        // the closest thing to "where the sound already was".
+        if let device = outputs.first(where: { $0.uid == group.deviceUID }), device.isDefault {
+            let fallback = groupCandidates.first { $0.uid == group.clockUID } ?? groupCandidates.first
+            if let fallback {
+                makeDefault(fallback.id, scope: kAudioObjectPropertyScopeOutput)
+            }
         }
         if let id = AggregateDevice.existing()[group.deviceUID] {
             AggregateDevice.destroy(id)
@@ -718,16 +817,29 @@ final class SoundService {
                 AggregateDevice.create(group)
                 continue
             }
+            // Never rebuild the group that is currently playing: destroying
+            // the default output makes the HAL pick a replacement and hands
+            // the new device a different id, which looks from the outside like
+            // the output select refusing to change.
+            let isPlaying = id == defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
             // Self-heal a group built by an older version in the wrong mode —
             // it would otherwise play to its first member only, forever.
-            if !AggregateDevice.isMirrored(id) {
+            if !isPlaying, !AggregateDevice.isMirrored(id) {
                 AggregateDevice.destroy(id)
                 AggregateDevice.create(group)
             }
         }
 
         let wantedUIDs = Set(wanted.map(\.deviceUID))
+        let playing = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
         for (uid, id) in existing where !wantedUIDs.contains(uid) {
+            // Never pull the device out from under the audio that is playing
+            // through it. An unclaimed group is usually a stray left by a
+            // crash, but if it is the current output then destroying it makes
+            // the HAL fall back to some other device mid-listen — which is
+            // indistinguishable from "the output keeps changing by itself".
+            // It will be cleaned up on a later pass, once it is idle.
+            guard id != playing else { continue }
             AggregateDevice.destroy(id)
         }
     }

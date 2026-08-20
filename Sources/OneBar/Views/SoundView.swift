@@ -641,7 +641,12 @@ struct DeviceCard: View {
                 HStack(spacing: 8) {
                     Picker("", selection: selection) {
                         ForEach(devices) { option in
-                            Text(option.name).tag(option.id)
+                            // Keyed on the UID, not the AudioObjectID: ids are
+                            // handed out per connection, so plugging in AirPods
+                            // or rebuilding a group renumbers them and the
+                            // selection stops matching any row — which reads as
+                            // a select that won't change.
+                            Text(option.name).tag(option.uid)
                         }
                     }
                     .pickerStyle(.menu)
@@ -717,11 +722,11 @@ struct DeviceCard: View {
             .frame(width: 14)
     }
 
-    private var selection: Binding<AudioObjectID> {
+    private var selection: Binding<String> {
         Binding(
-            get: { device?.id ?? 0 },
-            set: { id in
-                guard let picked = devices.first(where: { $0.id == id }) else { return }
+            get: { device?.uid ?? "" },
+            set: { uid in
+                guard let picked = devices.first(where: { $0.uid == uid }) else { return }
                 service.makeDefault(picked.id, scope: picked.scope)
             }
         )
