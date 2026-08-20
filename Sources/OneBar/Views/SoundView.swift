@@ -90,7 +90,6 @@ struct SoundScreen: View {
         } else {
             if !service.outputs.isEmpty {
                 DeviceCard(title: "Output", devices: service.outputs)
-                groupsCard
             }
             if !service.inputs.isEmpty {
                 DeviceCard(
@@ -98,6 +97,11 @@ struct SoundScreen: View {
                     devices: service.inputs,
                     meter: state.soundInputMeterEnabled
                 )
+            }
+            // Last: a group is something you set up once and then forget,
+            // unlike the two selects above it.
+            if !service.outputs.isEmpty {
+                groupsCard
             }
         }
     }
@@ -248,7 +252,7 @@ struct SoundScreen: View {
                     }
                 }
 
-                Text("The volume slider moves every device in the group together — a group has no volume control of its own.")
+                Text("A group has no volume control of its own, so the slider and the volume keys move every device in it together.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

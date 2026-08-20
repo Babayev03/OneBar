@@ -138,6 +138,7 @@ final class SoundService {
 
     func tearDown() {
         stopTracking()
+        VolumeKeyMonitor.shared.stop()
         systemListeners.removeAll()
         deviceListeners.removeAll()
         outputs = []
@@ -191,6 +192,7 @@ final class SoundService {
         }
 
         observeDefaults(output: defaultOutput, input: defaultInput)
+        updateVolumeKeyMonitor()
 
         // A meter left running on a device that is no longer the default would
         // be metering the wrong microphone, and holding it open for nothing.
@@ -635,6 +637,47 @@ final class SoundService {
         }
         OutputGroupStore.shared.remove(group.id)
         refresh()
+    }
+
+    /// The volume keys only need taking over while a group is playing —
+    /// every other device answers them itself.
+    private func updateVolumeKeyMonitor() {
+        if outputs.contains(where: { $0.isDefault && $0.isGroup }) {
+            VolumeKeyMonitor.shared.start()
+        } else {
+            VolumeKeyMonitor.shared.stop()
+        }
+    }
+
+    /// A volume key press, redirected into the group fan-out. Returns false
+    /// when there is nothing here for it to do, so the press is left alone.
+    @discardableResult
+    func handleVolumeKey(keyType: Int32) -> Bool {
+        guard let device = outputs.first(where: { $0.isDefault }), device.isGroup else { return false }
+        let scope = kAudioObjectPropertyScopeOutput
+
+        // 7 is NX_KEYTYPE_MUTE; 0 and 1 are sound up and down.
+        if keyType == 7 {
+            let muted = !device.isMuted
+            setMuted(muted, for: device.id, scope: scope)
+            HUD.show(
+                muted ? "Muted" : "Unmuted",
+                symbol: muted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+            )
+            return true
+        }
+
+        let step = VolumeKeyMonitor.step
+        // Snap to the step grid, so a level that started at some odd value
+        // lands on round numbers after a press or two rather than staying off
+        // by a fraction forever.
+        let moved = device.volume + (keyType == 0 ? step : -step)
+        let target = min(max((moved / step).rounded() * step, 0), 1)
+        setVolume(target, for: device.id, scope: scope)
+
+        let percent = Int((target * 100).rounded())
+        HUD.show("\(percent)%", symbol: target == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+        return true
     }
 
     /// Rebuilds any group the HAL has lost and destroys any aggregate device of
