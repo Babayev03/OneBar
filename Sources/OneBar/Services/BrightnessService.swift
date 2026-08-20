@@ -311,7 +311,7 @@ final class BrightnessService {
 /// milliseconds, and a slider drag produces far more values than a monitor can
 /// swallow.
 private final class DDCBackend {
-    private let queue = DispatchQueue(label: "com.ilham.onebar.ddc", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.onebar.app.ddc", qos: .userInitiated)
     private let lock = NSLock()
 
     private var channels: [CGDirectDisplayID: DDC.Channel] = [:]
