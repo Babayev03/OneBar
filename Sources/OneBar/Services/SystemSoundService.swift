@@ -16,13 +16,17 @@ import AppKit
 final class SystemSoundService {
     static let shared = SystemSoundService()
 
-    /// 0...1 and linear, the same scale System Settings' slider draws. Note
-    /// AppleScript reports this on a different, logarithmic scale that goes
-    /// negative below ~0.37, so its number is not this one.
+    /// 0...1 on the scale System Settings' slider *draws*, which is not the
+    /// scale the key is *stored* on: the stored number is `exp(shown - 1)`, so
+    /// the bottom third of the raw range (everything under 1/e ≈ 0.368) is off
+    /// the left end of that slider. Writing a raw 0.3 therefore reads as zero
+    /// and silences alerts outright — the failure this conversion exists for.
+    /// AppleScript's `set volume alert volume` takes the shown scale as 0...100,
+    /// which is why its number never matched the key's.
     var alertVolume: Double = 1 {
         didSet {
             guard !reloading, alertVolume != oldValue else { return }
-            Self.write(Self.volumeKey, alertVolume as CFNumber)
+            Self.write(Self.volumeKey, Self.stored(alertVolume) as CFNumber)
         }
     }
 
@@ -52,11 +56,23 @@ final class SystemSoundService {
         defer { reloading = false }
 
         if let volume = Self.read(Self.volumeKey) as? Double {
-            alertVolume = min(max(volume, 0), 1)
+            alertVolume = Self.shown(volume)
         }
         if let effects = Self.read(Self.effectsKey) as? Int {
             soundEffectsEnabled = effects != 0
         }
+    }
+
+    // MARK: - Slider scale
+
+    /// Zero is stored as a literal 0 rather than as `exp(-1)`, because that is
+    /// what System Settings writes at the bottom of its own slider.
+    private static func stored(_ shown: Double) -> Double {
+        shown <= 0 ? 0 : exp(min(shown, 1) - 1)
+    }
+
+    private static func shown(_ stored: Double) -> Double {
+        stored <= 0 ? 0 : min(max(1 + log(stored), 0), 1)
     }
 
     // MARK: - NSGlobalDomain
