@@ -187,7 +187,6 @@ final class AppAudioService {
             .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil }
 
         var listed: [App] = []
-        var seen = Set<String>()
 
         // Everything the user added, running or not.
         for bundleID in pinned {
@@ -204,7 +203,6 @@ final class AppAudioService {
                 volume: setting.volume,
                 isMuted: setting.isMuted
             ))
-            seen.insert(bundleID)
         }
 
         // Nothing is listed on its own. A list that fills itself cannot also
@@ -215,7 +213,6 @@ final class AppAudioService {
             if $0.isPlaying != $1.isPlaying { return $0.isPlaying }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
-        _ = running
 
         syncTaps(live: live)
     }

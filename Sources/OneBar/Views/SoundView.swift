@@ -230,7 +230,7 @@ struct SoundScreen: View {
 
         Text(appAudio.apps.isEmpty
              ? "Add an app to give it its own volume. Nothing appears here on its own — only what you add is routed through OneBar."
-             : "Apps on this list play through OneBar, even at 100% — that is what keeps level changes silent instead of clicking. Anything not listed is untouched; remove one with ✕ to take OneBar back out of its audio.")
+             : "An app is routed through OneBar only while it is turned down or muted, so the first step below 100% can click once. Back at 100% — and anything not listed — is untouched.")
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

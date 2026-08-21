@@ -165,6 +165,11 @@ final class SoundService {
             inputs = []
             deviceListeners.removeAll()
             stopTracking()
+            // Without this the tap outlives the feature: it goes on swallowing
+            // every F10/F11/F12 press system-wide, while the handler behind it
+            // finds `outputs` empty and does nothing. The keys would look
+            // broken everywhere until Sound was switched back on.
+            VolumeKeyMonitor.shared.stop()
             return
         }
 
@@ -266,7 +271,16 @@ final class SoundService {
             let memberIDs = OutputGroupStore.shared.group(withDeviceUID: uid)?
                 .memberUIDs.compactMap { deviceIDsByUID[$0] } ?? []
             if !memberIDs.isEmpty {
-                volumeControl = .group(memberIDs)
+                // Borrowed only where there is something to borrow. A group of
+                // HDMI or DisplayPort outputs has no member that can be turned
+                // down, and claiming `.group` anyway gave it a slider that
+                // moved: the write fanned out to `.none` on every member and
+                // reached no hardware, while the read came back empty and so
+                // never corrected the stored value. The level walked up a step
+                // per keypress, for ever, with nothing getting louder.
+                volumeControl = memberIDs.contains { memberControls[$0]?.0 != VolumeControl.none }
+                    ? .group(memberIDs)
+                    : .none
                 muteControl = memberIDs.contains { memberControls[$0]?.1 != MuteControl.none }
                     ? .group(memberIDs)
                     : .none
@@ -764,7 +778,12 @@ final class SoundService {
     /// The volume keys only need taking over while a group is playing —
     /// every other device answers them itself.
     private func updateVolumeKeyMonitor() {
-        if outputs.contains(where: { $0.isDefault && $0.isGroup }) {
+        // Only for a group that can actually act on them. The tap has to decide
+        // whether to swallow a press before it can reach the main actor, so a
+        // group with no borrowable control would eat the keys and answer with a
+        // HUD reporting a change that never happened — worse than letting macOS
+        // show its own "no control" response.
+        if outputs.contains(where: { $0.isDefault && $0.isGroup && ($0.isAdjustable || $0.canMute) }) {
             VolumeKeyMonitor.shared.start()
         } else {
             VolumeKeyMonitor.shared.stop()
@@ -780,6 +799,7 @@ final class SoundService {
 
         // 7 is NX_KEYTYPE_MUTE; 0 and 1 are sound up and down.
         if keyType == 7 {
+            guard device.canMute else { return false }
             let muted = !device.isMuted
             setMuted(muted, for: device.id, scope: scope)
             HUD.show(
@@ -788,6 +808,12 @@ final class SoundService {
             )
             return true
         }
+
+        // The HUD has to be told the same "no" the write would get. Reporting
+        // a percentage the hardware never took is worse than not answering: the
+        // number sticks in memory, so the next press starts from the fake value
+        // and the display walks away from the truth a step at a time.
+        guard device.isAdjustable else { return false }
 
         let step = VolumeKeyMonitor.step
         // Snap to the step grid, so a level that started at some odd value
