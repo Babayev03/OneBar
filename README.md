@@ -6,8 +6,9 @@
 
 <p align="center">
   A free, open-source macOS menubar utility — clipboard history with OCR & QR superpowers,
-  system monitoring, brightness for every display, keyboard cleaning, prevent-sleep,
-  auto mouse move, and a visual auto clicker with turbo mode. One icon, everything at hand.
+  system monitoring, brightness for every display, sound with per-app volume, keyboard cleaning,
+  prevent-sleep, auto mouse move, and a visual auto clicker with turbo mode.
+  One icon, everything at hand.
 </p>
 
 <p align="center">
@@ -59,7 +60,7 @@ Keyboard-driven panel (every key remappable in Preferences):
 - **Sessions, not a switch**: keep the Mac awake indefinitely, for a set number of minutes or hours, for a custom length, until a time of day, **while an app is running**, or **while a file is downloading** — the session ends itself when its reason does
 - **Closed-lid mode**: keeps working with the lid shut *on battery*, which macOS otherwise refuses without a power adapter and an external display
 - Keeps the screen awake too, unless you opt out with "Let the display sleep"
-- Safe by construction: a **low-battery cutoff**, a live countdown on a separate menubar cup icon, and everything — including the lid — handed back on quit, on ⌘Q, and on the next launch after a crash
+- Safe by construction: a **low-battery cutoff**, a live countdown on a separate menubar cup icon, and everything — including the lid — handed back whenever OneBar quits, however it quits, and on the next launch after a crash
 
 ### 🔆 Display brightness
 - **Brightness sliders for every screen**, including external monitors macOS itself gives you no control over — the F1/F2 keys only ever move the built-in panel
@@ -68,6 +69,15 @@ Keyboard-driven panel (every key remappable in Preferences):
 - The built-in display goes through the same path macOS uses itself, so System Settings agrees with the slider
 - A monitor that won't answer DDC (some need DDC/CI enabling in their own menu) falls back to **software dimming**, which is labelled as such rather than pretending — and is put back the moment OneBar quits
 - **No new permissions**
+
+### 🔊 Sound
+- **Volume, mute and output switching** for every device, in the menu and on a screen of its own — the same things Control Center does, one click closer
+- **Output groups — play to several devices at once** (laptop speakers *and* AirPods, say). macOS can do this, but only as a "Multi-Output Device" buried in Audio MIDI Setup; OneBar makes it a **named group you pick like any other output**
+- **The volume keys keep working under a group.** A multi-output device has no volume control of its own, which is why F11/F12 go dead the moment you select one — the standing complaint about them. OneBar takes the keys over while a group is playing and moves every device in it together
+- **Per-app volume** — turn a browser down without touching your music, or mute one app outright. **No audio driver and no installer**: it uses the process taps macOS has had since 14.2, so nothing is added to your system
+- **Alert volume and UI sound effects**, the two settings that live outside the audio devices entirely — how loud beeps and notifications are, and whether interface sounds play at all. The same values System Settings shows, so the two always agree
+- **Input device picker**, with an optional live level meter — off by default, since a meter means opening the microphone and lighting the orange dot in the menu bar
+- Devices that genuinely have no volume control (some USB interfaces, the Continuity iPhone mic) are shown with the slider disabled and a note, rather than a slider that silently does nothing
 
 ### 🖱️ Auto mouse move
 - Keeps **Teams, Slack and friends on Available** instead of flipping you to Away while you're reading, on a call, or away from the desk
@@ -95,6 +105,12 @@ Keyboard-driven panel (every key remappable in Preferences):
 ### 🔍 Scan Text / Scan QR
 - Select any region of your screen and instantly get its **text (OCR)** or **QR payload** on the clipboard
 
+### 🎨 Pick color
+- A loupe over any pixel on screen — grab a color out of a screenshot, a website, another app's UI
+- Copies as **hex**, **HEX**, **CSS `rgb()`** or a **SwiftUI `Color`**, your pick
+- Lands in clipboard history like anything else you copy, so it stays searchable
+- Global shortcut (`⌥⌘P` by default), and **no Screen Recording permission** — the sampling happens outside OneBar
+
 ## Install
 
 Requires **macOS 26+** and Xcode command line tools.
@@ -105,16 +121,18 @@ cd OneBar
 ./build-app.sh
 ```
 
-That builds a release binary, assembles `OneBar.app`, ad-hoc signs it, installs it to `/Applications`, and launches it.
+That builds a release binary, assembles `OneBar.app`, ad-hoc signs it, installs it to `/Applications` (or `~/Applications` if that isn't writable), and launches it.
 
 ### Permissions
 
 macOS will ask for these on first use of the corresponding feature:
 
-- **Accessibility** — required for keyboard cleaning, auto mouse move, auto click, and pasting into other apps (System Settings → Privacy & Security → Accessibility)
+- **Accessibility** — required for keyboard cleaning, auto mouse move, auto click, and pasting into other apps (System Settings → Privacy & Security → Accessibility). Also used, if you have already granted it, to keep the volume keys working under an output group — that one never prompts, because being asked for a permission just for picking an audio device would be baffling
 - **Screen Recording** — required for Scan Text / Scan QR
+- **System Audio Recording** — required only for **per-app volume**. macOS calls reading an app's audio "recording"; it is played straight back out at the level you picked, and nothing is stored or sent anywhere
+- **Microphone** — only if you switch on the input level meter, and only while the Sound screen is open
 
-Display brightness needs **neither** — DDC/CI and the built-in backlight are both permission-free.
+Display brightness and Pick color need **none of them** — DDC/CI, the built-in backlight and the system color sampler are all permission-free.
 
 Everything runs **100% on-device**. OneBar makes no network requests, ever.
 
@@ -124,12 +142,15 @@ Everything runs **100% on-device**. OneBar makes no network requests, ever.
 - Live menubar stats, update frequency, ring thresholds
 - Image limit & optional history cap
 - Ignored apps
-- Fully remappable shortcuts, including global ones for the clipboard panel (`⌘H`), the Auto Click canvas (`⌥⌘C`) and turbo click (`⌥⌘T`)
+- Fully remappable shortcuts, including global ones for the clipboard panel (`⌘H`), the Auto Click canvas (`⌥⌘C`), turbo click (`⌥⌘T`) and pick color (`⌥⌘P`)
+- What `⌘Q` does — ask first, quit, or do nothing (the Quit button in the menu always quits)
 - Keyboard-cleaning duration, prevent-sleep auto-off and display-sleep behavior, accent color
 - Auto mouse move interval, distance, speed, idle-awareness and auto-off
 - Auto click repeat count, travel speed, typing speed, click scatter, timing variation, path curve and auto-off
 - Turbo click rate and button
 - Display brightness controls on/off, and whether to fall back to software dimming
+- Sound controls on/off, and the microphone level meter
+- The format picked colors are copied in
 
 ## License
 

@@ -52,7 +52,13 @@ struct SoundScreen: View {
         .animation(.spring(response: 0.28, dampingFraction: 0.86), value: page)
         // Tighter than the menu's own lifecycle on purpose: the meter holds the
         // microphone open, so it lives and dies with this screen.
-        .onAppear { service.startTracking() }
+        .onAppear {
+            service.startTracking()
+            // System Settings and other apps write these behind our back, and
+            // a read is ~1µs, so they are re-read on the way in rather than
+            // watched for.
+            SystemSoundService.shared.refresh()
+        }
         .onDisappear { service.stopTracking() }
     }
 
@@ -118,6 +124,8 @@ struct SoundScreen: View {
                     meter: state.soundInputMeterEnabled
                 )
             }
+            AlertsCard()
+
             // Last: neither of these is a thing you touch often, unlike the
             // two selects above them.
             if !service.outputs.isEmpty {
@@ -604,6 +612,78 @@ struct SoundScreen: View {
 /// rather than a list — a Mac with a dock and a headset has more devices than
 /// the popover has height for, and a scrolling list clips whichever row is
 /// unlucky.
+/// Alert volume and UI sound effects. Drawn as a peer of the Output and Input
+/// cards because that is what it is — the level of a third thing the Mac
+/// plays, which no device slider on this page moves.
+struct AlertsCard: View {
+    private var system: SystemSoundService { SystemSoundService.shared }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Alerts")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text("\(Int((system.alertVolume * 100).rounded()))%")
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+
+                // Previewed on release, not during the drag: one beep per
+                // step would be a stutter rather than a demonstration, and
+                // the alert sound is long enough to overlap itself.
+                Slider(value: volume, in: 0...1) { editing in
+                    if !editing { system.previewAlert() }
+                }
+                .controlSize(.small)
+
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sound effects")
+                        .font(.system(size: 12))
+                    Text("Clicks, drag and drop, emptying the trash.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Toggle("", isOn: effects)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .liquidGlass(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var volume: Binding<Double> {
+        Binding(get: { system.alertVolume }, set: { system.alertVolume = $0 })
+    }
+
+    private var effects: Binding<Bool> {
+        Binding(get: { system.soundEffectsEnabled }, set: { system.soundEffectsEnabled = $0 })
+    }
+}
+
 struct DeviceCard: View {
     let title: String
     let devices: [SoundService.Device]

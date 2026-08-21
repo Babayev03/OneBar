@@ -112,3 +112,23 @@ enum ColorFormat: String, Codable, CaseIterable, Identifiable {
         string(from: NSColor(srgbRed: 30 / 255, green: 136 / 255, blue: 229 / 255, alpha: 1))
     }
 }
+
+/// What ⌘Q does. Three states rather than a Bool because the dialog's
+/// "Don't ask again" has two opposite meanings depending on the button it is
+/// ticked with: remembering "Quit" and remembering "Hide" are different
+/// answers, and a Bool could only store one of them.
+enum QuitShortcutBehavior: String, Codable, CaseIterable, Identifiable {
+    case ask
+    case quit
+    case ignore
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ask: return "Ask"
+        case .quit: return "Quit OneBar"
+        case .ignore: return "Do nothing"
+        }
+    }
+}

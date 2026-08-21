@@ -396,6 +396,16 @@ final class ClipboardPanelController {
         let editing = isEditingSearch
         let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
 
+        // ⌘Q reaches the panel's own monitor before the main menu's key
+        // equivalent, and the panel is usually what is in front when it gets
+        // pressed by mistake. Hopped off this callback: the confirmation runs
+        // a modal loop, which must not start inside event dispatch.
+        if event.keyCode == 12 && mods == [.command] {
+            hide()
+            Task { @MainActor in QuitConfirmation.requestQuit() }
+            return true
+        }
+
         // Esc: close preview → close popup → leave search → close panel.
         if event.keyCode == 53 {
             if model.showPreview {

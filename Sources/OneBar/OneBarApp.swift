@@ -18,6 +18,18 @@ struct OneBarApp: App {
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
+        // Replacing SwiftUI's own Quit item is what puts the confirmation in
+        // front of ⌘Q. The menu is never drawn — an accessory app has none —
+        // but its key equivalents still fire while one of our windows is key,
+        // which is the only way ⌘Q reaches OneBar at all.
+        .commands {
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit OneBar") {
+                    QuitConfirmation.requestQuit()
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
+        }
     }
 }
 
