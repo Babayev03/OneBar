@@ -87,6 +87,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SystemStatsService.shared.start()
         }
         BrightnessService.shared.start()
+        // Before the first enumeration, or the strays are listed as devices for
+        // the length of this launch.
+        AppMixer.destroyLegacyGroupDevices()
         SoundService.shared.start()
         AppAudioService.shared.start()
         HotkeyManager.shared.registerFromStore()

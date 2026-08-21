@@ -2,8 +2,8 @@ import CoreAudio
 import SwiftUI
 
 /// The Sound screen the menu pushes to: one card per direction, each with the
-/// device select and whatever controls that device actually has, plus the
-/// output groups. Sub-pages replace the content in place rather than opening
+/// device select and whatever controls that device actually has, plus per-app
+/// volumes. Sub-pages replace the content in place rather than opening
 /// anything — the popover is 300pt wide and has nowhere to put a sheet.
 struct SoundScreen: View {
     let back: () -> Void
@@ -12,15 +12,9 @@ struct SoundScreen: View {
         case root
         case apps
         case addApp
-        case newGroup
-        case group(UUID)
     }
 
     @State private var page: Page = .root
-    /// Member UIDs in the order they were picked — the first is the clock the
-    /// others follow.
-    @State private var picked: [String] = []
-    @State private var groupName = ""
     @State private var appSearch = ""
     /// Owned explicitly so the field can be focused on arrival and, more
     /// importantly, *unfocused* on the way out — a text field that keeps first
@@ -42,8 +36,6 @@ struct SoundScreen: View {
                 case .root: rootPage
                 case .apps: appsPage
                 case .addApp: addAppPage
-                case .newGroup: newGroupPage
-                case .group(let id): groupPage(id)
                 }
             }
             .padding(.horizontal, 14)
@@ -72,7 +64,7 @@ struct SoundScreen: View {
             switch page {
             case .root: back()
             case .addApp: page = .apps
-            case .apps, .newGroup, .group: page = .root
+            case .apps: page = .root
             }
         } label: {
             HStack(spacing: 6) {
@@ -97,9 +89,6 @@ struct SoundScreen: View {
         case .root: return "Sound"
         case .apps: return "App volumes"
         case .addApp: return "Add an app"
-        case .newGroup: return "New group"
-        case .group(let id):
-            return OutputGroupStore.shared.groups.first { $0.id == id }?.name ?? "Group"
         }
     }
 
@@ -145,41 +134,6 @@ struct SoundScreen: View {
                 ) {
                     appAudio.refresh()
                     page = .apps
-                }
-            }
-
-            groupsCard
-        }
-    }
-
-    private var groupsCard: some View {
-        VStack(spacing: 6) {
-            sectionLabel("Groups")
-
-            card {
-                ForEach(OutputGroupStore.shared.groups) { group in
-                    row(group.name, id: "g\(group.id)", trailing: "chevron.right") {
-                        page = .group(group.id)
-                    }
-                    divider
-                }
-
-                if service.groupCandidates.count > 1 {
-                    row("New group…", id: "newgroup", leading: "plus") {
-                        picked = []
-                        groupName = ""
-                        page = .newGroup
-                    }
-                } else {
-                    // Saying nothing at all here reads as a missing feature
-                    // rather than as a Mac with one speaker in it.
-                    Text("Connect a second output device — headphones, AirPods, a display — to play to both at once.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -238,7 +192,7 @@ struct SoundScreen: View {
 
         Text(appAudio.apps.isEmpty
              ? "Add an app to give it its own volume. Nothing appears here on its own — only what you add is routed through OneBar."
-             : "An app is routed through OneBar only while it is turned down or muted, so the first step below 100% can click once. Back at 100% — and anything not listed — is untouched.")
+             : "A listed app is routed through OneBar while it is playing, at any level, so moving a slider is silent. Anything not listed is untouched.")
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -347,9 +301,19 @@ struct SoundScreen: View {
 
                 Spacer()
 
-                Text(app.isMuted ? "muted" : "\(Int((app.volume * 100).rounded()))%")
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if app.isMuted {
+                    Text("muted")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                } else if app.boost.isBoosted {
+                    Text("\(Int((app.volume * 100).rounded()))% · \(app.boost.label)")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(state.accentColor)
+                } else {
+                    Text("\(Int((app.volume * 100).rounded()))%")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
 
             HStack(spacing: 8) {
@@ -378,6 +342,10 @@ struct SoundScreen: View {
                 .controlSize(.small)
                 .disabled(app.isMuted)
 
+                BoostChevrons(level: app.boost) {
+                    appAudio.cycleBoost(for: app.bundleID)
+                }
+
                 Button {
                     appAudio.remove(app.bundleID)
                 } label: {
@@ -402,135 +370,6 @@ struct SoundScreen: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-    }
-
-    // MARK: - Creating a group
-
-    private var newGroupPage: some View {
-        VStack(spacing: 8) {
-            Text("Pick two or more. Sound plays to all of them at once.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
-
-            card {
-                ForEach(Array(service.groupCandidates.enumerated()), id: \.element.id) { index, device in
-                    if index > 0 { divider }
-                    memberRow(device)
-                }
-            }
-
-            TextField(suggestedName, text: $groupName)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .font(.system(size: 12))
-
-            Button {
-                service.createGroup(
-                    name: groupName.isEmpty ? suggestedName : groupName,
-                    memberUIDs: picked
-                )
-                page = .root
-            } label: {
-                Text("Create")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .liquidGlass(in: Capsule())
-            .disabled(picked.count < 2)
-            .opacity(picked.count < 2 ? 0.4 : 1)
-        }
-    }
-
-    private func memberRow(_ device: SoundService.Device) -> some View {
-        let index = picked.firstIndex(of: device.uid)
-        return Button {
-            if let index {
-                picked.remove(at: index)
-            } else {
-                picked.append(device.uid)
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: index == nil ? "square" : "checkmark.square.fill")
-                    .font(.system(size: 12))
-
-                Text(device.name)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-
-                Spacer()
-
-                // The first one picked keeps time; the others are told to
-                // follow it, or they slowly drift apart.
-                if index == 0 {
-                    Text("clock")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 4)
-    }
-
-    private var suggestedName: String {
-        let names = picked.compactMap { uid in
-            service.groupCandidates.first { $0.uid == uid }?.name
-        }
-        return names.isEmpty ? "New group" : names.joined(separator: " + ")
-    }
-
-    // MARK: - One group
-
-    @ViewBuilder
-    private func groupPage(_ id: UUID) -> some View {
-        if let group = OutputGroupStore.shared.groups.first(where: { $0.id == id }) {
-            VStack(spacing: 8) {
-                card {
-                    let names = service.memberNames(of: group)
-                    ForEach(Array(names.enumerated()), id: \.offset) { index, name in
-                        if index > 0 { divider }
-                        HStack(spacing: 8) {
-                            Text(name)
-                                .font(.system(size: 13))
-                                .lineLimit(1)
-
-                            Spacer()
-
-                            if index == 0 {
-                                Text("clock")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                    }
-                }
-
-                Text("A group has no volume control of its own, so the slider and the volume keys move every device in it together.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-
-                card {
-                    row("Delete group", id: "delete", destructive: true) {
-                        service.deleteGroup(group)
-                        page = .root
-                    }
-                }
-            }
-        }
     }
 
     // MARK: - Building blocks
@@ -842,5 +681,49 @@ struct LevelBar: View {
             }
         }
         .frame(height: 4)
+    }
+}
+
+/// Stacked chevron boost indicator matching FineTune — 3 SF Symbol chevrons that light up based on boost level.
+/// Click to cycle: 1x → 2x → 3x → 4x → 1x
+struct BoostChevrons: View {
+    let level: BoostLevel
+    let onTap: () -> Void
+
+    @State private var isHovered = false
+
+    private var litCount: Int {
+        switch level {
+        case .x1: return 0
+        case .x2: return 1
+        case .x3: return 2
+        case .x4: return 3
+        }
+    }
+
+    private func chevronColor(at index: Int) -> Color {
+        if index < litCount {
+            return AppState.shared.accentColor
+        } else {
+            return isHovered ? .primary.opacity(0.35) : .primary.opacity(0.18)
+        }
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: -3) {
+                ForEach((0..<3).reversed(), id: \.self) { index in
+                    Image(systemName: "chevron.compact.up")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundStyle(chevronColor(at: index))
+                }
+            }
+            .frame(width: 16, height: 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help("Volume boost: \(level.label)")
+        .animation(.snappy(duration: 0.2), value: level)
     }
 }

@@ -75,6 +75,17 @@ enum CoreAudioProperty {
         return value.takeRetainedValue() as String
     }
 
+    /// How many separate streams a scope carries, as opposed to how many
+    /// channels they add up to. The distinction matters for an aggregate: its
+    /// input side lists the wrapped device's own streams first and the process
+    /// tap last, so the count is what locates the tap.
+    static func streamCount(_ object: AudioObjectID, scope: AudioObjectPropertyScope) -> Int {
+        var address = address(kAudioDevicePropertyStreams, scope: scope)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size) == noErr else { return 0 }
+        return Int(size) / MemoryLayout<AudioStreamID>.size
+    }
+
     /// Channels on a scope, which is how you tell an output device from an
     /// input one. `AudioBufferList` is variable-length, so it can't be read
     /// into a value — the buffer has to be sized from the HAL's own answer.

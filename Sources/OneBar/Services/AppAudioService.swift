@@ -4,36 +4,70 @@ import CoreAudio
 import Foundation
 import Observation
 
+/// Per-app volume boost multiplier.
+enum BoostLevel: Float, CaseIterable, Codable {
+    case x1 = 1.0
+    case x2 = 2.0
+    case x3 = 3.0
+    case x4 = 4.0
+
+    var label: String {
+        switch self {
+        case .x1: "1x"
+        case .x2: "2x"
+        case .x3: "3x"
+        case .x4: "4x"
+        }
+    }
+
+    var next: BoostLevel {
+        switch self {
+        case .x1: .x2
+        case .x2: .x3
+        case .x3: .x4
+        case .x4: .x1
+        }
+    }
+
+    var isBoosted: Bool { self != .x1 }
+}
+
 /// One app's saved level.
-///
-/// Keyed by the app you actually picked — `com.apple.Safari` — not by the
-/// process that makes the noise. A browser plays through a helper
-/// (`com.apple.WebKit.GPU`), Electron apps do the same, and which helper exists
-/// changes from moment to moment. `AppAudioService.processes(for:)` resolves an
-/// app to whatever is currently making sound on its behalf.
 struct AppAudioSetting: Codable, Equatable {
     var bundleID: String
     var name: String
     var volume: Double
     var isMuted: Bool
+    var boost: BoostLevel = .x1
+    var outputDeviceUID: String? = nil
 
-    var isDefault: Bool { volume >= 0.999 && !isMuted }
+    var isDefault: Bool { abs(volume - 1.0) < 0.001 && !isMuted && boost == .x1 && outputDeviceUID == nil }
+
+    enum CodingKeys: String, CodingKey {
+        case bundleID, name, volume, isMuted, boost, outputDeviceUID
+    }
+
+    init(bundleID: String, name: String, volume: Double, isMuted: Bool, boost: BoostLevel = .x1, outputDeviceUID: String? = nil) {
+        self.bundleID = bundleID
+        self.name = name
+        self.volume = volume
+        self.isMuted = isMuted
+        self.boost = boost
+        self.outputDeviceUID = outputDeviceUID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bundleID = try container.decode(String.self, forKey: .bundleID)
+        name = try container.decode(String.self, forKey: .name)
+        volume = try container.decode(Double.self, forKey: .volume)
+        isMuted = try container.decode(Bool.self, forKey: .isMuted)
+        boost = try container.decodeIfPresent(BoostLevel.self, forKey: .boost) ?? .x1
+        outputDeviceUID = try container.decodeIfPresent(String.self, forKey: .outputDeviceUID)
+    }
 }
 
-/// Per-app volume and mute, without an audio driver.
-///
-/// Background Music and SoundSource both install a virtual sound card to become
-/// the system mixer; OneBar is ad-hoc signed with no installer, so it uses
-/// process taps instead (macOS 14.2+):
-///
-/// - **Mute** costs a tap and nothing else. Apple's header on `CATapMuted`:
-///   "audio is captured by the tap but no audio is sent from the process to the
-///   audio hardware". Nothing has to be rendered.
-/// - **Volume** costs a real-time render loop. The app is silenced while its
-///   tap is read (`.mutedWhenTapped`) and `AppMixer` plays it back quieter.
-///
-/// An app left at 100% and unmuted has **no tap at all**, so with nothing
-/// turned down OneBar is not in the audio path.
+/// Per-app volume, boost, mute, and output routing without an audio driver.
 @MainActor
 @Observable
 final class AppAudioService {
@@ -44,56 +78,44 @@ final class AppAudioService {
         let bundleID: String
         let name: String
         let icon: NSImage?
-        /// Whether anything is currently making sound on this app's behalf.
         let isPlaying: Bool
-        /// Whether the app is running at all.
         let isRunning: Bool
         var volume: Double
         var isMuted: Bool
+        var boost: BoostLevel
+        var outputDeviceUID: String?
 
         static func == (lhs: App, rhs: App) -> Bool {
             lhs.bundleID == rhs.bundleID && lhs.isPlaying == rhs.isPlaying
                 && lhs.isRunning == rhs.isRunning
                 && lhs.volume == rhs.volume && lhs.isMuted == rhs.isMuted
+                && lhs.boost == rhs.boost && lhs.outputDeviceUID == rhs.outputDeviceUID
         }
     }
 
-    /// The apps on the page: every one you added, plus anything currently
-    /// making sound.
+    /// The apps on the page: every one you added, plus anything currently making sound.
     private(set) var apps: [App] = []
 
-    /// The last failure from the HAL, shown rather than swallowed — without it
-    /// a missing permission is indistinguishable from a bug.
+    /// The last failure from the HAL, shown rather than swallowed.
     private(set) var lastError: String?
 
     @ObservationIgnored private var settings: [String: AppAudioSetting] = [:]
     /// Apps the user added by hand, which stay listed at 100% too.
     @ObservationIgnored private var pinned: Set<String> = []
 
-    @ObservationIgnored private var taps: [String: AudioObjectID] = [:]
-    @ObservationIgnored private var tapUIDs: [String: String] = [:]
-    @ObservationIgnored private var tapBehaviours: [String: CATapMuteBehavior] = [:]
-    /// Which audio processes each tap was built over, so it is only rebuilt
-    /// when that set actually changes.
-    @ObservationIgnored private var tapProcesses: [String: [AudioObjectID]] = [:]
-
-    /// One mixer per app, so adding or removing one never interrupts another's
-    /// audio and a level can never land on the wrong app.
+    /// One mixer per app, managing its tap and aggregate device atomically.
     @ObservationIgnored private var mixers: [String: AppMixer] = [:]
     @ObservationIgnored private let fileURL: URL
     @ObservationIgnored private var processListener: CoreAudioListener?
     @ObservationIgnored private let queue = DispatchQueue(label: "com.onebar.app.appaudio")
+    /// While the system output is changing, no process-list or device-list
+    /// notification may rebuild a mixer onto the device we are releasing.
+    @ObservationIgnored private var isChangingSystemOutput = false
 
     private init() {
         fileURL = ClipboardStore.shared.baseDirectory.appendingPathComponent("app-volumes.json")
         if let data = try? Data(contentsOf: fileURL),
            let decoded = try? JSONDecoder().decode([AppAudioSetting].self, from: data) {
-            // Keep only rows that name an app you could actually launch. This
-            // drops two kinds of junk: daemons that hold an audio stream open
-            // (com.apple.CoreSpeech), and rows an earlier version saved under
-            // the *helper* process rather than its app — com.apple.WebKit.GPU
-            // instead of com.apple.Safari — which could never match a running
-            // app again and so sat there reading "Not running" forever.
             let usable = decoded.filter {
                 NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.bundleID) != nil
             }
@@ -121,13 +143,6 @@ final class AppAudioService {
         processListener = nil
         for (_, running) in mixers { running.stop() }
         mixers = [:]
-        // A tap mutes the app it is on, so one left behind would leave an app
-        // silent with nothing running to un-silence it.
-        for (_, tap) in taps { AudioHardwareDestroyProcessTap(tap) }
-        taps = [:]
-        tapUIDs = [:]
-        tapBehaviours = [:]
-        tapProcesses = [:]
         apps = []
     }
 
@@ -135,14 +150,6 @@ final class AppAudioService {
         settings.values.filter { !$0.isDefault }.count
     }
 
-    /// What the machinery is actually doing. Not shown by default — there is a
-    /// commented-out row in `SoundScreen.appsPage` that renders it when
-    /// something needs diagnosing.
-    ///
-    /// Computed on read, never stored. Stored, it was written at the end of the
-    /// same refresh that started a mixer — so a freshly started mixer was
-    /// always sampled microseconds after starting and always reported zero
-    /// renders, which read as "dead" when it was simply new.
     var status: String {
         let adjusted = settings.values.filter { !$0.isDefault }
         guard !adjusted.isEmpty else { return "" }
@@ -151,26 +158,17 @@ final class AppAudioService {
             .map { setting in
                 let mixer = mixers[setting.bundleID]
                 return "\(setting.name): "
-                    + (taps[setting.bundleID] != nil ? "tapped" : "NO TAP")
-                    + ", " + (mixer?.isRunning == true ? "\(mixer?.renderCount ?? 0) renders" : "NO MIXER")
+                    + (mixer?.isRunning == true ? "\(mixer?.renderCount ?? 0) renders" : "NO MIXER")
             }
             .joined(separator: " · ")
     }
 
     // MARK: - Which processes belong to an app
 
-    /// The audio processes currently playing on an app's behalf.
-    ///
-    /// Matches the app's own bundle id first, then falls back to any process
-    /// whose cleaned-up name is the app's — which is what catches
-    /// `com.apple.WebKit.GPU` for Safari and the renderer helpers for Electron
-    /// apps.
     private func processes(for setting: AppAudioSetting, live: [AudioProcess.Info]) -> [AudioObjectID] {
         var matched: [AudioProcess.Info] = []
         for process in live {
             if process.bundleID == setting.bundleID
-                // The system's own attribution: WebKit's GPU process is
-                // Safari's responsibility, and that survives a rename.
                 || process.responsibleBundleID == setting.bundleID
                 || process.name.caseInsensitiveCompare(setting.name) == .orderedSame {
                 matched.append(process)
@@ -188,11 +186,11 @@ final class AppAudioService {
 
         var listed: [App] = []
 
-        // Everything the user added, running or not.
         for bundleID in pinned {
             let setting = settings[bundleID] ?? AppAudioSetting(
                 bundleID: bundleID, name: bundleID, volume: 1, isMuted: false
             )
+            settings[bundleID] = setting
             let app = running.first { $0.bundleIdentifier == bundleID }
             listed.append(App(
                 bundleID: bundleID,
@@ -201,14 +199,12 @@ final class AppAudioService {
                 isPlaying: !processes(for: setting, live: live).isEmpty,
                 isRunning: app != nil,
                 volume: setting.volume,
-                isMuted: setting.isMuted
+                isMuted: setting.isMuted,
+                boost: setting.boost,
+                outputDeviceUID: setting.outputDeviceUID
             ))
         }
 
-        // Nothing is listed on its own. A list that fills itself cannot also
-        // have a remove button that means "stay gone" — removing an app while
-        // it was playing put it straight back, which read as a broken button.
-        // To change an app's level you add it first.
         apps = listed.sorted {
             if $0.isPlaying != $1.isPlaying { return $0.isPlaying }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -228,9 +224,6 @@ final class AppAudioService {
 
     @ObservationIgnored private var candidateCache: [Candidate] = []
 
-    /// Builds the addable list. Reads every installed app's Info.plist and
-    /// icon, so it is called when the picker opens — **never** from a view
-    /// body, where a hover would re-run it a hundred times a second.
     func refreshCandidates() {
         let live = AudioProcess.all()
         var found: [String: Candidate] = [:]
@@ -266,15 +259,12 @@ final class AppAudioService {
         }
 
         candidateCache = found.values.sorted {
-            // What is already making sound is what you are most likely
-            // reaching for.
             if $0.isPlaying != $1.isPlaying { return $0.isPlaying }
             if $0.isRunning != $1.isRunning { return $0.isRunning }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
     }
 
-    /// Cheap: filters the cache, nothing else. Safe to call from a view body.
     func candidates(matching query: String = "") -> [Candidate] {
         let already = Set(apps.map(\.bundleID))
         let trimmed = query.trimmingCharacters(in: .whitespaces)
@@ -284,8 +274,6 @@ final class AppAudioService {
         }
     }
 
-    /// Scanned once — reading a hundred Info.plists on every keystroke of a
-    /// search field would be felt.
     private static let installedCache: [URL] = {
         let manager = FileManager.default
         var roots = ["/Applications", "/Applications/Utilities", "/System/Applications"]
@@ -313,7 +301,6 @@ final class AppAudioService {
 
     // MARK: - Adding and removing
 
-    /// Puts an app on the page so it can be set before it ever plays a sound.
     func add(bundleID: String, name: String) {
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil else { return }
         pinned.insert(bundleID)
@@ -326,10 +313,11 @@ final class AppAudioService {
         refresh()
     }
 
-    /// Back to untouched: no tap, no row, OneBar out of the way.
     func remove(_ bundleID: String) {
         pinned.remove(bundleID)
         settings.removeValue(forKey: bundleID)
+        mixers[bundleID]?.stop()
+        mixers.removeValue(forKey: bundleID)
         write()
         refresh()
     }
@@ -337,12 +325,22 @@ final class AppAudioService {
     // MARK: - Changing a level
 
     func setVolume(_ value: Double, for bundleID: String) {
-        let clamped = min(max(value, 0), 1)
+        let clamped = min(max(value, 0), 1.0)
         var setting = settings[bundleID] ?? blankSetting(for: bundleID)
         setting.volume = clamped
-        // Turning it up is how you unmute, exactly as on a device.
         if clamped > 0 { setting.isMuted = false }
         apply(setting)
+    }
+
+    func setBoost(_ boost: BoostLevel, for bundleID: String) {
+        var setting = settings[bundleID] ?? blankSetting(for: bundleID)
+        setting.boost = boost
+        apply(setting)
+    }
+
+    func cycleBoost(for bundleID: String) {
+        let current = settings[bundleID]?.boost ?? .x1
+        setBoost(current.next, for: bundleID)
     }
 
     func setMuted(_ muted: Bool, for bundleID: String) {
@@ -370,10 +368,7 @@ final class AppAudioService {
             setting.name = name
         }
 
-        let wasNeeded = needsRendering(settings[setting.bundleID])
         settings[setting.bundleID] = setting
-        // Touching a row is how it gets remembered — but only if it is a real
-        // app, or a stray daemon row would be saved right back.
         if NSWorkspace.shared.urlForApplication(withBundleIdentifier: setting.bundleID) != nil {
             pinned.insert(setting.bundleID)
         }
@@ -382,206 +377,106 @@ final class AppAudioService {
         if let index = apps.firstIndex(where: { $0.bundleID == setting.bundleID }) {
             apps[index].volume = setting.volume
             apps[index].isMuted = setting.isMuted
+            apps[index].boost = setting.boost
+            apps[index].outputDeviceUID = setting.outputDeviceUID
         }
 
-        // A level change that does not change *whether* the app is routed
-        // through OneBar has no tap to build and none to drop, so it must not
-        // pay for a refresh: enumerating the HAL's process list and resolving
-        // each one to an app costs ~4ms, which at slider rate is most of a
-        // frame. Only crossing the line — 100% and unmuted, or not — is a
-        // change to the plumbing.
-        if wasNeeded == needsRendering(setting) {
-            // Nil while a turned-down app is not playing; it picks the level
-            // up when the process listener starts one.
-            mixers[setting.bundleID]?.setGain(gain(for: setting))
-            return
-        }
-
-        refresh()
+        // Direct gain update in the running RT loop without touching hardware or rebuilding
+        mixers[setting.bundleID]?.setGain(gain(for: setting))
     }
 
-    // MARK: - Taps
+    // MARK: - Taps & Mixers
 
-    /// Whether an app should be routed through OneBar at all.
-    ///
-    /// Mute used to ride on `CATapMuted` alone, on the strength of the header
-    /// saying "no audio is sent from the process to the audio hardware" — and
-    /// it did nothing. A tap that no one is reading appears not to be running
-    /// at all, so nothing enforced the mute. Muting is now simply a gain of
-    /// zero through the same path as every other level.
-    ///
-    /// **Only apps actually turned down or muted.** Holding the route open for
-    /// every listed app was tried, to avoid the click when crossing 100%, and
-    /// it cost far more than it saved: a running mixer keeps OneBar in the
-    /// audio graph, and while one existed the output device could not be
-    /// changed at all — an app sitting untouched at 100% silently disabled the
-    /// output select. A click when you first turn something down is a much
-    /// smaller price than that.
     private func needsRendering(_ setting: AppAudioSetting?) -> Bool {
-        guard let setting else { return false }
-        return !setting.isDefault
+        setting != nil
     }
 
     private func gain(for setting: AppAudioSetting?) -> Float {
-        guard let setting else { return 1 }
-        return setting.isMuted ? 0 : Float(setting.volume)
+        guard let setting, !setting.isMuted else { return 0 }
+        let vol = Float(setting.volume)
+        let boost = setting.boost.rawValue
+        // x^2 perceptual curve * boost multiplier (protected by SoftLimiter)
+        return (vol * vol) * boost
     }
 
     private func syncTaps(live: [AudioProcess.Info]) {
-        var wanted: [String: [AudioObjectID]] = [:]
-        for setting in settings.values where !setting.isDefault {
+        guard !isChangingSystemOutput else { return }
+
+        let systemOutputUIDs = SoundService.shared.currentOutputDeviceUIDs
+        var wanted: [String: (processes: [AudioObjectID], outputUIDs: [String])] = [:]
+
+        for setting in settings.values where needsRendering(setting) {
             let ids = processes(for: setting, live: live)
-            if !ids.isEmpty { wanted[setting.bundleID] = ids }
-        }
-
-        // Drop taps for apps back at 100%, or that stopped playing entirely.
-        for (bundleID, tap) in taps where wanted[bundleID] == nil {
-            AudioHardwareDestroyProcessTap(tap)
-            taps.removeValue(forKey: bundleID)
-            tapUIDs.removeValue(forKey: bundleID)
-            tapBehaviours.removeValue(forKey: bundleID)
-            tapProcesses.removeValue(forKey: bundleID)
-        }
-
-        for (bundleID, processIDs) in wanted {
-            // Always muted-while-read: the mixer is what puts the audio back,
-            // at zero for a muted app.
-            let behaviour: CATapMuteBehavior = .mutedWhenTapped
-
-            // A tap's behaviour and its process list are both fixed at
-            // creation, so either changing means a new tap.
-            if taps[bundleID] != nil,
-               tapBehaviours[bundleID] == behaviour,
-               tapProcesses[bundleID] == processIDs {
-                continue
+            if !ids.isEmpty {
+                let targets = setting.outputDeviceUID.map { [$0] } ?? systemOutputUIDs
+                if !targets.isEmpty {
+                    wanted[setting.bundleID] = (ids, targets)
+                }
             }
-            if let existing = taps[bundleID] {
-                AudioHardwareDestroyProcessTap(existing)
-                taps.removeValue(forKey: bundleID)
-            }
-
-            // Plain mixdown, not the device-bound variant. The device-bound
-            // one is the better-sounding API — "streams destined for the
-            // selected device" — but an aggregate holding both that tap and
-            // the same device never ran its render loop at all, while this one
-            // is measured delivering audio.
-            let description = CATapDescription(stereoMixdownOfProcesses: processIDs)
-            description.name = "OneBar \(settings[bundleID]?.name ?? bundleID)"
-            description.isPrivate = true
-            description.muteBehavior = behaviour
-            description.uuid = UUID()
-
-            var tapID = AudioObjectID(0)
-            let status = AudioHardwareCreateProcessTap(description, &tapID)
-            guard status == noErr, tapID != 0 else {
-                lastError = Self.describe(status)
-                continue
-            }
-
-            lastError = nil
-            taps[bundleID] = tapID
-            tapBehaviours[bundleID] = behaviour
-            tapProcesses[bundleID] = processIDs
-            tapUIDs[bundleID] = CoreAudioProperty.string(
-                tapID,
-                CoreAudioProperty.address(kAudioTapPropertyUID)
-            ) ?? description.uuid.uuidString
         }
 
-        rebuildMixer()
-    }
-
-    /// A four-character OSStatus reads as gibberish in decimal; the code is the
-    /// only thing that says *why* the HAL refused.
-    private static func describe(_ status: OSStatus) -> String {
-        let value = UInt32(bitPattern: status)
-        let bytes = [
-            UInt8((value >> 24) & 0xFF), UInt8((value >> 16) & 0xFF),
-            UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF)
-        ]
-        let printable = bytes.allSatisfy { $0 >= 32 && $0 < 127 }
-        let code = printable ? "'\(String(bytes: bytes, encoding: .ascii) ?? "")'" : "\(status)"
-        if status == kAudioHardwareIllegalOperationError || !printable {
-            return "Couldn't read app audio (\(code)). Check System Settings → Privacy & Security → System Audio Recording."
-        }
-        return "Couldn't read app audio (\(code))."
-    }
-
-    /// Only apps below 100% are rendered. Each gets its own mixer; the others
-    /// are torn down.
-    private func rebuildMixer() {
-        let outputUIDs = SoundService.shared.currentOutputDeviceUIDs
-        let rendered = taps.keys.filter { needsRendering(settings[$0]) }
-
-        for (bundleID, running) in mixers where !rendered.contains(bundleID) {
-            running.stop()
+        // Drop mixers for apps that were removed or stopped playing
+        for bundleID in mixers.keys where wanted[bundleID] == nil {
+            mixers[bundleID]?.stop()
             mixers.removeValue(forKey: bundleID)
         }
 
-        for bundleID in rendered {
-            guard let uid = tapUIDs[bundleID], !outputUIDs.isEmpty else { continue }
-            let wanted = gain(for: settings[bundleID])
-
-            // Leave a running mixer alone: creating a tap changes the process
-            // list and creating a device changes the device list, and both
-            // fire listeners that land back here. Restarting unconditionally
-            // is what stopped the loop ever rendering a buffer.
-            if let running = mixers[bundleID],
-               running.isRunning,
-               running.tapUID == uid,
-               running.outputUIDs == outputUIDs {
-                running.setGain(wanted)
-                continue
-            }
-
+        for (bundleID, info) in wanted {
+            let wantedGain = gain(for: settings[bundleID])
             let mixer = mixers[bundleID] ?? AppMixer()
             mixers[bundleID] = mixer
-            if !mixer.start(outputUIDs: outputUIDs, tapUID: uid, gain: wanted) {
-                lastError = "Couldn't start the mixer for \(settings[bundleID]?.name ?? bundleID)."
+
+            let tapDrift = info.outputUIDs.first.map { !SoundService.shared.isBluetooth(uid: $0) } ?? true
+            let started = mixer.start(
+                processIDs: info.processes,
+                outputUIDs: info.outputUIDs,
+                gain: wantedGain,
+                label: settings[bundleID]?.name ?? bundleID,
+                tapDriftCompensation: tapDrift
+            )
+            if !started {
+                lastError = "Couldn't route audio for \(settings[bundleID]?.name ?? bundleID)."
+                mixer.stop()
                 mixers.removeValue(forKey: bundleID)
+            } else {
+                lastError = nil
             }
         }
     }
 
-    /// Called on every one of `SoundService`'s refreshes, which is why it has
-    /// to decide for itself whether the device really changed.
-    ///
-    /// When it did, let go of the old device *first* and rebuild a moment
-    /// later: tearing an aggregate down and standing a new one up inside the
-    /// same instant the system is re-pointing its default is what let a running
-    /// mixer fight the switch.
-    ///
-    /// When it did not, rebuild in place — `rebuildMixer` leaves a matching
-    /// running mixer alone. Stepping out unconditionally here was a loop with
-    /// no exit: starting a mixer creates an aggregate device, that fires the
-    /// device-list listener, `SoundService.refresh()` lands back here and stops
-    /// the mixer it just started. The level looked dead because every mixer was
-    /// torn down 700ms after it began, forever.
     func outputDeviceChanged() {
+        guard !isChangingSystemOutput else { return }
+
         let current = SoundService.shared.currentOutputDeviceUIDs
         let changed = current != lastOutputUIDs
         lastOutputUIDs = current
 
-        guard changed, !mixers.isEmpty else {
-            rebuildMixer()
-            return
-        }
-
-        for (_, running) in mixers { running.stop() }
-        mixers = [:]
-
-        rebuildTask?.cancel()
-        rebuildTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(700))
-            guard !Task.isCancelled else { return }
-            rebuildMixer()
+        if changed {
+            refresh()
         }
     }
 
-    /// What the mixers are currently playing into, so a refresh that changed
-    /// nothing can be told apart from a real switch.
     @ObservationIgnored private var lastOutputUIDs: [String] = []
-    @ObservationIgnored private var rebuildTask: Task<Void, Never>?
+
+    /// Releases every aggregate before `SoundService` asks the HAL to change
+    /// its default output. `AppMixer.stop()` is intentionally asynchronous for
+    /// ordinary cleanup; output switching is the one place that must wait.
+    func prepareForSystemOutputChange() async {
+        isChangingSystemOutput = true
+        let activeMixers = Array(mixers.values)
+        mixers = [:]
+        for mixer in activeMixers {
+            await mixer.stopAndWait()
+        }
+    }
+
+    /// Rebuilds pinned, playing apps against whichever output the HAL accepted.
+    /// This also safely restores the old route if the device switch failed.
+    func finishSystemOutputChange() {
+        lastOutputUIDs = SoundService.shared.currentOutputDeviceUIDs
+        isChangingSystemOutput = false
+        refresh()
+    }
 
     private func write() {
         var list: [AppAudioSetting] = []
