@@ -77,6 +77,13 @@ final class SystemSoundService {
     /// makes it track the slider by construction — the same trade FineTune
     /// makes for its volume-change pop.
     func previewAlert() {
+        // Ours to enforce now that we play the sound ourselves: the system
+        // silenced `AudioServicesPlaySystemSound` on our behalf, an NSSound
+        // it knows nothing about it will happily play. Turning interface
+        // sounds off and still being beeped at is the app ignoring the very
+        // switch sitting under this slider.
+        guard soundEffectsEnabled else { return }
+
         let path = Self.alertSoundPath
         if previewPath != path {
             // By path rather than `NSSound(named:)`: a cached named instance
