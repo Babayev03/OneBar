@@ -169,6 +169,19 @@ final class AppState {
         didSet { UserDefaults.standard.set(autoClickAutoOffMinutes, forKey: "autoClickAutoOffMinutes") }
     }
 
+    /// Show the Sound controls in the menu.
+    var soundEnabled: Bool {
+        didSet { UserDefaults.standard.set(soundEnabled, forKey: "soundEnabled") }
+    }
+
+    /// Live input level on the Sound screen. Off by default and deliberately
+    /// opt-in: there is no level property in CoreAudio, so a meter means
+    /// opening the microphone — which lights the orange dot in the menubar for
+    /// as long as it runs.
+    var soundInputMeterEnabled: Bool {
+        didSet { UserDefaults.standard.set(soundInputMeterEnabled, forKey: "soundInputMeterEnabled") }
+    }
+
     /// Show the Display brightness controls in the menu.
     var brightnessEnabled: Bool {
         didSet { UserDefaults.standard.set(brightnessEnabled, forKey: "brightnessEnabled") }
@@ -250,6 +263,8 @@ final class AppState {
             "autoClickAutoOffMinutes": 0,
             "turboClickRate": 25.0,
             "turboClickButton": "left",
+            "soundEnabled": true,
+            "soundInputMeterEnabled": false,
             "brightnessEnabled": true,
             "brightnessSoftwareFallback": true,
             "colorPickerFormat": "hex",
@@ -288,6 +303,8 @@ final class AppState {
         autoClickAutoOffMinutes = defaults.integer(forKey: "autoClickAutoOffMinutes")
         turboClickRate = defaults.double(forKey: "turboClickRate")
         turboClickButton = ClickButton(rawValue: defaults.string(forKey: "turboClickButton") ?? "") ?? .left
+        soundEnabled = defaults.bool(forKey: "soundEnabled")
+        soundInputMeterEnabled = defaults.bool(forKey: "soundInputMeterEnabled")
         brightnessEnabled = defaults.bool(forKey: "brightnessEnabled")
         brightnessSoftwareFallback = defaults.bool(forKey: "brightnessSoftwareFallback")
         colorPickerFormat = ColorFormat(rawValue: defaults.string(forKey: "colorPickerFormat") ?? "") ?? .hex

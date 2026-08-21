@@ -10,6 +10,7 @@ struct MenuView: View {
     private var canvas: ClickCanvasController { ClickCanvasController.shared }
     private var turbo: TurboClickService { TurboClickService.shared }
     private var brightness: BrightnessService { BrightnessService.shared }
+    private var sound: SoundService { SoundService.shared }
     private var sleep: SleepPreventionManager { SleepPreventionManager.shared }
 
     /// Control Center pushes a section's detail over the whole popover rather
@@ -17,6 +18,7 @@ struct MenuView: View {
     private enum Route {
         case main
         case brightness
+        case sound
         case sleep
     }
 
@@ -41,6 +43,10 @@ struct MenuView: View {
                 BrightnessScreen { route = .main }
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
                     .transition(transition(into: panelHeight))
+            case .sound:
+                SoundScreen { route = .main }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
+                    .transition(transition(into: panelHeight))
             case .sleep:
                 SleepScreen(back: { route = .main }, dismissMenu: { dismiss() })
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
@@ -62,6 +68,7 @@ struct MenuView: View {
             Task { @MainActor in appeared = true } // next tick, after first layout
             brightness.refreshSystemValues()
             brightness.startTracking()
+            sound.refreshSystemValues()
         }
         .onDisappear {
             appeared = false
@@ -150,6 +157,9 @@ struct MenuView: View {
         VStack(spacing: 8) {
             if state.brightnessEnabled, !brightness.displays.isEmpty {
                 scanButton("Display", systemImage: "sun.max") { route = .brightness }
+            }
+            if state.soundEnabled, !sound.outputs.isEmpty {
+                scanButton("Sound", systemImage: "speaker.wave.2") { route = .sound }
             }
             scanButton(
                 sleepTitle,

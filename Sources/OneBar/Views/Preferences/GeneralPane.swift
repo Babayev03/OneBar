@@ -85,6 +85,39 @@ struct GeneralPane: View {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
+                            Text("Show sound controls")
+                                .font(.system(size: 14))
+                            Spacer()
+                            Toggle("", isOn: soundBinding)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        }
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Microphone level meter")
+                                    .font(.system(size: 14))
+                                Text("CoreAudio has no level property, so a meter has to open the microphone. The orange dot stays in the menu bar while the Sound screen is open, and nothing is recorded.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Toggle("", isOn: inputMeterBinding)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        }
+                    }
+                    .padding(6)
+                } label: {
+                    Text("Sound")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
                             Text("Show display brightness")
                                 .font(.system(size: 14))
                             Spacer()
@@ -187,6 +220,28 @@ struct GeneralPane: View {
     }
 
     // MARK: - Bindings
+
+    private var soundBinding: Binding<Bool> {
+        Binding(
+            get: { state.soundEnabled },
+            set: { enabled in
+                state.soundEnabled = enabled
+                SoundService.shared.refresh()
+            }
+        )
+    }
+
+    private var inputMeterBinding: Binding<Bool> {
+        Binding(
+            get: { state.soundInputMeterEnabled },
+            set: { enabled in
+                state.soundInputMeterEnabled = enabled
+                // Turning it off must let go of the microphone now, not
+                // whenever the Sound screen next closes.
+                if !enabled { SoundService.shared.stopTracking() }
+            }
+        )
+    }
 
     private var brightnessBinding: Binding<Bool> {
         Binding(
