@@ -149,6 +149,30 @@ struct GeneralPane: View {
                 }
 
                 GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("When ⌘Q is pressed")
+                                    .font(.system(size: 14))
+                                Text("Only applies while a OneBar window is focused. The Quit button in the menu always quits, and Force Quit is never affected.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Picker("", selection: quitBehaviorBinding) {
+                                ForEach(QuitShortcutBehavior.allCases) { behavior in
+                                    Text(behavior.title).tag(behavior)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 140)
+                        }
+                    }
+                    .padding(6)
+                }
+
+                GroupBox {
                     HStack {
                         Text("Keyboard cleaning duration")
                             .font(.system(size: 14))
@@ -310,6 +334,10 @@ struct GeneralPane: View {
 
     private var colorFormatBinding: Binding<ColorFormat> {
         Binding(get: { state.colorPickerFormat }, set: { state.colorPickerFormat = $0 })
+    }
+
+    private var quitBehaviorBinding: Binding<QuitShortcutBehavior> {
+        Binding(get: { state.quitShortcutBehavior }, set: { state.quitShortcutBehavior = $0 })
     }
 
     private var cleaningBinding: Binding<Int> {

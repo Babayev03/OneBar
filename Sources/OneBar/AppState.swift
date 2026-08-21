@@ -198,6 +198,11 @@ final class AppState {
         didSet { UserDefaults.standard.set(colorPickerFormat.rawValue, forKey: "colorPickerFormat") }
     }
 
+    /// What ⌘Q does while one of OneBar's own windows is focused.
+    var quitShortcutBehavior: QuitShortcutBehavior {
+        didSet { UserDefaults.standard.set(quitShortcutBehavior.rawValue, forKey: "quitShortcutBehavior") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -268,6 +273,7 @@ final class AppState {
             "brightnessEnabled": true,
             "brightnessSoftwareFallback": true,
             "colorPickerFormat": "hex",
+            "quitShortcutBehavior": "ask",
             "accentName": "blue"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
@@ -308,6 +314,7 @@ final class AppState {
         brightnessEnabled = defaults.bool(forKey: "brightnessEnabled")
         brightnessSoftwareFallback = defaults.bool(forKey: "brightnessSoftwareFallback")
         colorPickerFormat = ColorFormat(rawValue: defaults.string(forKey: "colorPickerFormat") ?? "") ?? .hex
+        quitShortcutBehavior = QuitShortcutBehavior(rawValue: defaults.string(forKey: "quitShortcutBehavior") ?? "") ?? .ask
         accentName = defaults.string(forKey: "accentName") ?? "blue"
     }
 }
