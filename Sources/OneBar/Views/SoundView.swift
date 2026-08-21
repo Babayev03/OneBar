@@ -654,7 +654,7 @@ struct AlertsCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Sound effects")
                         .font(.system(size: 12))
-                    Text("Clicks, the screenshot shutter, emptying the trash.")
+                    Text("Clicks, drag and drop, emptying the trash.")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
