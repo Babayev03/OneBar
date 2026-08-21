@@ -41,8 +41,13 @@ final class SystemSoundService {
 
     private var reloading = false
 
+    /// Held across previews so a drag does not reload the file each release.
+    private var preview: NSSound?
+    private var previewPath: String?
+
     private static let volumeKey = "com.apple.sound.beep.volume" as CFString
     private static let effectsKey = "com.apple.sound.uiaudio.enabled" as CFString
+    private static let soundKey = "com.apple.sound.beep.sound" as CFString
 
     private init() {
         refresh()
@@ -61,6 +66,44 @@ final class SystemSoundService {
         if let effects = Self.read(Self.effectsKey) as? Int {
             soundEffectsEnabled = effects != 0
         }
+    }
+
+    /// The alert sound at the level just set, played by us rather than by the
+    /// system. `AudioServicesPlaySystemSound(kSystemSoundID_UserPreferredAlert)`
+    /// is the obvious call and the wrong one: it leaves the level to the sound
+    /// server, which applies whatever it last read from the key rather than
+    /// what was just written, so that preview came out the same loudness at
+    /// every position on the slider. Owning the playback and setting `volume`
+    /// makes it track the slider by construction — the same trade FineTune
+    /// makes for its volume-change pop.
+    func previewAlert() {
+        let path = Self.alertSoundPath
+        if previewPath != path {
+            // By path rather than `NSSound(named:)`: a cached named instance
+            // stops honouring the output device after long uptime.
+            preview = NSSound(contentsOfFile: path, byReference: true)
+            previewPath = path
+        }
+        guard let preview else { return }
+        preview.stop() // rewinds — play() on a playing sound returns false
+        preview.volume = Float(alertVolume)
+        preview.play()
+    }
+
+    /// The chosen alert sound. The key stores a bare name on some systems and
+    /// a full path on others, and it goes stale — it has been seen reading
+    /// `Bottle.aiff` while the Sound pane showed "Pebble" — so anything that
+    /// does not resolve to a real file falls back rather than going silent,
+    /// since a preview that plays nothing reads as a broken slider.
+    private static var alertSoundPath: String {
+        let fallback = "/System/Library/Sounds/Funk.aiff"
+        guard let chosen = read(soundKey) as? String, !chosen.isEmpty else { return fallback }
+        let candidates = chosen.hasPrefix("/")
+            ? [chosen]
+            : ["\(NSHomeDirectory())/Library/Sounds/\(chosen).aiff",
+               "/Library/Sounds/\(chosen).aiff",
+               "/System/Library/Sounds/\(chosen).aiff"]
+        return candidates.first { FileManager.default.fileExists(atPath: $0) } ?? fallback
     }
 
     // MARK: - Slider scale

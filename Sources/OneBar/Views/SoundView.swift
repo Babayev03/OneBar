@@ -637,11 +637,13 @@ struct AlertsCard: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
-                // No preview beep on release. System Settings plays one; here
-                // it lands while the panel is open and reads as the app making
-                // a noise at you, not as a demonstration.
-                Slider(value: volume, in: 0...1)
-                    .controlSize(.small)
+                // Previewed on release, not during the drag: one beep per
+                // step would be a stutter rather than a demonstration, and
+                // the alert sound is long enough to overlap itself.
+                Slider(value: volume, in: 0...1) { editing in
+                    if !editing { system.previewAlert() }
+                }
+                .controlSize(.small)
 
                 Image(systemName: "speaker.wave.3.fill")
                     .font(.system(size: 12))
