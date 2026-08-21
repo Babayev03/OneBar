@@ -75,6 +75,7 @@ Keyboard-driven panel (every key remappable in Preferences):
 - **Output groups — play to several devices at once** (laptop speakers *and* AirPods, say). macOS can do this, but only as a "Multi-Output Device" buried in Audio MIDI Setup; OneBar makes it a **named group you pick like any other output**
 - **The volume keys keep working under a group.** A multi-output device has no volume control of its own, which is why F11/F12 go dead the moment you select one — the standing complaint about them. OneBar takes the keys over while a group is playing and moves every device in it together
 - **Per-app volume** — turn a browser down without touching your music, or mute one app outright. **No audio driver and no installer**: it uses the process taps macOS has had since 14.2, so nothing is added to your system
+- **Alert volume and UI sound effects**, the two settings that live outside the audio devices entirely — how loud beeps and notifications are, and whether interface sounds play at all. The same values System Settings shows, so the two always agree
 - **Input device picker**, with an optional live level meter — off by default, since a meter means opening the microphone and lighting the orange dot in the menu bar
 - Devices that genuinely have no volume control (some USB interfaces, the Continuity iPhone mic) are shown with the slider disabled and a note, rather than a slider that silently does nothing
 
