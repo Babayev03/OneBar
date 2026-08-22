@@ -228,25 +228,25 @@ final class AppMixer {
         }
         tapID = newTapID
 
-        let tapUID = CoreAudioProperty.string(
-            newTapID,
-            CoreAudioProperty.address(kAudioTapPropertyUID)
-        ) ?? tapDesc.uuid.uuidString
-
         // Build aggregate device
         let config: [String: Any] = [
             kAudioAggregateDeviceNameKey: "OneBar Mixer \(label)",
             kAudioAggregateDeviceUIDKey: AppMixer.uidPrefix + UUID().uuidString,
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceIsStackedKey: 1,
             kAudioAggregateDeviceMainSubDeviceKey: outputUIDs[0],
-            kAudioAggregateDeviceSubDeviceListKey: outputUIDs.map {
-                [kAudioSubDeviceUIDKey: $0, kAudioSubDeviceDriftCompensationKey: $0 == outputUIDs[0] ? 0 : 1]
+            kAudioAggregateDeviceClockDeviceKey: outputUIDs[0],
+            kAudioAggregateDeviceIsPrivateKey: true,
+            // Match FineTune's wrapper exactly: even one ordinary physical
+            // destination is stacked. This keeps the wrapper's clock/output
+            // topology independent from macOS's default-device ownership.
+            kAudioAggregateDeviceIsStackedKey: true,
+            kAudioAggregateDeviceTapAutoStartKey: true,
+            kAudioAggregateDeviceSubDeviceListKey: outputUIDs.enumerated().map { index, uid in
+                [kAudioSubDeviceUIDKey: uid, kAudioSubDeviceDriftCompensationKey: index > 0]
             },
             kAudioAggregateDeviceTapListKey: [
                 [
-                    kAudioSubTapUIDKey: tapUID,
-                    kAudioSubTapDriftCompensationKey: tapDriftCompensation ? 1 : 0
+                    kAudioSubTapUIDKey: tapDesc.uuid.uuidString,
+                    kAudioSubTapDriftCompensationKey: tapDriftCompensation
                 ]
             ]
         ]
@@ -281,24 +281,23 @@ final class AppMixer {
             renders.pointee &+= 1
 
             let outputs = UnsafeMutableAudioBufferListPointer(output)
-            guard let first = outputs.first, let destination = first.mData else { return }
-            let outChannels = Int(first.mNumberChannels)
-            guard outChannels > 0 else { return }
-
-            memset(destination, 0, Int(first.mDataByteSize))
-            let out = destination.assumingMemoryBound(to: Float.self)
-            let frames = Int(first.mDataByteSize) / (MemoryLayout<Float>.size * outChannels)
+            guard !outputs.isEmpty else { return }
+            for buffer in outputs {
+                if let destination = buffer.mData {
+                    memset(destination, 0, Int(buffer.mDataByteSize))
+                }
+            }
 
             let inputs = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
-            let tapIndex = inputs.count > outputs.count ? inputs.count - outputs.count : 0
-            guard tapIndex < inputs.count else { return }
-            let buffer = inputs[tapIndex]
+            // Hardware input streams precede the one process tap in an
+            // aggregate. The stereo-mixdown tap is therefore the final input
+            // buffer regardless of how many output devices are stacked.
+            guard let buffer = inputs.last else { return }
             guard let source = buffer.mData else { return }
             let inChannels = Int(buffer.mNumberChannels)
             guard inChannels > 0 else { return }
 
-            let available = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.size * inChannels)
-            let count = min(frames, available)
+            let count = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.size * inChannels)
             let samples = source.assumingMemoryBound(to: Float.self)
 
             let goal = target.pointee
@@ -316,18 +315,39 @@ final class AppMixer {
                     level = goal
                 }
 
-                for channel in 0..<outChannels {
-                    let sourceChannel = min(channel, inChannels - 1)
-                    var s = samples[frame * inChannels + sourceChannel] * level
-
-                    let absS = abs(s)
-                    if absS > threshold {
-                        let over = absS - threshold
-                        let compressed = threshold + headroom * (over / (over + headroom))
-                        s = s < 0 ? -compressed : compressed
+                var channelOffset = 0
+                for outputBuffer in outputs {
+                    guard let destination = outputBuffer.mData else {
+                        channelOffset += Int(outputBuffer.mNumberChannels)
+                        continue
                     }
+                    let outChannels = Int(outputBuffer.mNumberChannels)
+                    guard outChannels > 0 else { continue }
+                    let frames = Int(outputBuffer.mDataByteSize)
+                        / (MemoryLayout<Float>.size * outChannels)
+                    guard frame < frames else {
+                        channelOffset += outChannels
+                        continue
+                    }
+                    let out = destination.assumingMemoryBound(to: Float.self)
 
-                    out[frame * outChannels + channel] = s
+                    for channel in 0..<outChannels {
+                        // Stacked stereo destinations repeat L/R. The modulo
+                        // also handles non-interleaved channel buffers without
+                        // sending every one the left channel.
+                        let sourceChannel = (channelOffset + channel) % inChannels
+                        var sample = samples[frame * inChannels + sourceChannel] * level
+
+                        let magnitude = abs(sample)
+                        if magnitude > threshold {
+                            let over = magnitude - threshold
+                            let compressed = threshold + headroom * (over / (over + headroom))
+                            sample = sample < 0 ? -compressed : compressed
+                        }
+
+                        out[frame * outChannels + channel] = sample
+                    }
+                    channelOffset += outChannels
                 }
             }
             current.pointee = level
@@ -361,9 +381,7 @@ final class AppMixer {
     /// input streams, so they are never switched on.
     private static func disableHardwareInputs(device: AudioObjectID, proc: AudioDeviceIOProcID) {
         let inputCount = CoreAudioProperty.streamCount(device, scope: kAudioObjectPropertyScopeInput)
-        let outputCount = CoreAudioProperty.streamCount(device, scope: kAudioObjectPropertyScopeOutput)
-        guard inputCount > 0, outputCount > 0, inputCount > min(outputCount, inputCount) else { return }
-        let tapStreams = min(outputCount, inputCount)
+        guard inputCount > 0 else { return }
 
         let headerSize = MemoryLayout<UnsafeMutableRawPointer>.size + MemoryLayout<UInt32>.size
         let totalSize = headerSize + inputCount * MemoryLayout<UInt32>.size
@@ -382,7 +400,9 @@ final class AppMixer {
         let flags = raw.advanced(by: headerSize)
         for index in 0..<inputCount {
             flags.advanced(by: index * MemoryLayout<UInt32>.size)
-                .storeBytes(of: UInt32(index >= inputCount - tapStreams ? 1 : 0), as: UInt32.self)
+                // This aggregate owns exactly one sub-tap, and CoreAudio places
+                // it after every wrapped hardware input stream.
+                .storeBytes(of: UInt32(index == inputCount - 1 ? 1 : 0), as: UInt32.self)
         }
 
         var address = CoreAudioProperty.address(

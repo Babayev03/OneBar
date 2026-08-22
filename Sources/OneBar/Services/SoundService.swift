@@ -1,3 +1,4 @@
+import AppKit
 import AudioToolbox
 import CoreAudio
 import Foundation
@@ -49,6 +50,7 @@ final class SoundService {
         /// Survives a replug, unlike `id`.
         let uid: String
         let name: String
+        let icon: NSImage?
         /// Output or input. A device can appear in both lists with different
         /// controls on each side.
         let scope: AudioObjectPropertyScope
@@ -60,6 +62,13 @@ final class SoundService {
 
         var isAdjustable: Bool { volumeControl != .none }
         var canMute: Bool { muteControl != .none }
+
+        static func == (lhs: Device, rhs: Device) -> Bool {
+            lhs.id == rhs.id && lhs.uid == rhs.uid && lhs.name == rhs.name
+                && lhs.scope == rhs.scope && lhs.volumeControl == rhs.volumeControl
+                && lhs.muteControl == rhs.muteControl && lhs.volume == rhs.volume
+                && lhs.isMuted == rhs.isMuted && lhs.isDefault == rhs.isDefault
+        }
     }
 
     private(set) var outputs: [Device] = []
@@ -104,6 +113,7 @@ final class SoundService {
     /// every tick of a slider drag.
     @ObservationIgnored private var memberControls: [AudioObjectID: (VolumeControl, MuteControl)] = [:]
     @ObservationIgnored private var deviceIDsByUID: [String: AudioObjectID] = [:]
+    @ObservationIgnored private var deviceIconCache: [String: NSImage] = [:]
 
     @ObservationIgnored private let meter = InputMeter()
     @ObservationIgnored private var meterTimer: Timer?
@@ -284,6 +294,7 @@ final class SoundService {
             id: id,
             uid: uid,
             name: name,
+            icon: deviceIcon(for: id, uid: uid, name: name, scope: scope),
             scope: scope,
             volumeControl: volumeControl,
             muteControl: muteControl,
@@ -291,6 +302,80 @@ final class SoundService {
             isMuted: readMute(id, scope: scope, control: muteControl),
             isDefault: isDefault
         )
+    }
+
+    /// FineTune's display precedence: CoreAudio driver image first, then a
+    /// name-aware SF Symbol, then a transport-aware generic symbol.
+    private func deviceIcon(
+        for id: AudioObjectID,
+        uid: String,
+        name: String,
+        scope: AudioObjectPropertyScope
+    ) -> NSImage? {
+        if let cached = deviceIconCache[uid] { return cached }
+
+        let icon: NSImage?
+        var address = CoreAudioProperty.address(kAudioDevicePropertyIcon)
+        var size = UInt32(MemoryLayout<Unmanaged<CFURL>?>.size)
+        var iconURL: Unmanaged<CFURL>?
+        if AudioObjectGetPropertyData(id, &address, 0, nil, &size, &iconURL) == noErr,
+           let url = iconURL?.takeRetainedValue() as URL?,
+           let driverIcon = NSImage(contentsOf: url) {
+            icon = driverIcon
+        } else {
+            let symbol = suggestedDeviceSymbol(for: id, name: name, scope: scope)
+            icon = NSImage(systemSymbolName: symbol, accessibilityDescription: name)
+        }
+
+        if let icon { deviceIconCache[uid] = icon }
+        return icon
+    }
+
+    private func suggestedDeviceSymbol(
+        for id: AudioObjectID,
+        name: String,
+        scope: AudioObjectPropertyScope
+    ) -> String {
+        if name.contains("iPhone") { return "iphone" }
+        if name.contains("iPad") { return "ipad" }
+        if name.contains("AirPods Pro") { return "airpodspro" }
+        if name.contains("AirPods Max") { return "airpodsmax" }
+        if name.contains("AirPods") { return "airpods.gen3" }
+        if name.contains("HomePod mini") { return "homepodmini" }
+        if name.contains("HomePod") { return "homepod" }
+        if name.contains("Apple TV") { return "appletv" }
+        if name.contains("Beats") { return "beats.headphones" }
+        if name.contains("Mac Studio") { return "macstudio.fill" }
+        if name.contains("Mac mini") { return "macmini.fill" }
+        if name.contains("MacBook") {
+            return scope == kAudioObjectPropertyScopeInput ? "laptopcomputer" : "macbook"
+        }
+        if name.contains("iMac") { return "desktopcomputer" }
+        if name.contains("Studio Display") || name.contains("Pro Display XDR") {
+            return "display"
+        }
+
+        let transport = CoreAudioProperty.value(
+            id,
+            CoreAudioProperty.address(kAudioDevicePropertyTransportType),
+            seed: UInt32(0)
+        ) ?? 0
+        if scope == kAudioObjectPropertyScopeInput {
+            return transport == kAudioDeviceTransportTypeUSB ? "cable.connector" : "mic"
+        }
+        switch transport {
+        case kAudioDeviceTransportTypeBuiltIn: return "hifispeaker"
+        case kAudioDeviceTransportTypeUSB: return "headphones"
+        case kAudioDeviceTransportTypeBluetooth,
+             kAudioDeviceTransportTypeBluetoothLE: return "headphones"
+        case kAudioDeviceTransportTypeAirPlay: return "airplayaudio"
+        case kAudioDeviceTransportTypeVirtual: return "waveform"
+        case kAudioDeviceTransportTypeThunderbolt: return "bolt.horizontal"
+        case kAudioDeviceTransportTypeHDMI,
+             kAudioDeviceTransportTypeDisplayPort: return "tv"
+        case kAudioDeviceTransportTypeAggregate: return "speaker.wave.2"
+        default: return "hifispeaker"
+        }
     }
 
     private func defaultDevice(_ selector: AudioObjectPropertySelector) -> AudioObjectID {
@@ -489,42 +574,103 @@ final class SoundService {
         guard outputs.first(where: { $0.id == id })?.isDefault != true,
               outputSwitchTask == nil else { return }
 
+        guard let target = outputs.first(where: { $0.id == id }) else { return }
+        let targetUID = target.uid
+        let bluetoothTarget = isBluetooth(uid: targetUID)
         let queue = writeQueue
         outputSwitchTask = Task { @MainActor in
             await AppAudioService.shared.prepareForSystemOutputChange()
 
+            // Destroying a private aggregate returns before every device-list
+            // notification has settled. The first default-device write in that
+            // window is commonly ignored while an app is playing, especially
+            // by Bluetooth drivers.
+            try? await Task.sleep(
+                for: .milliseconds(bluetoothTarget ? 220 : 70)
+            )
+
             // Default-device writes can block just like volume writes, and the
             // menu should remain responsive while Bluetooth settles.
-            await withCheckedContinuation { continuation in
+            let switched = await withCheckedContinuation { continuation in
                 queue.async {
-                    CoreAudioProperty.setValue(
-                        AudioObjectID(kAudioObjectSystemObject),
-                        CoreAudioProperty.address(kAudioHardwarePropertyDefaultOutputDevice),
-                        id
-                    )
-
-                    let canTakeSystem = CoreAudioProperty.value(
-                        id,
-                        CoreAudioProperty.address(
-                            kAudioDevicePropertyDeviceCanBeDefaultSystemDevice,
-                            scope: scope
-                        ),
-                        seed: UInt32(0)
-                    ) == 1
-                    if canTakeSystem {
-                        CoreAudioProperty.setValue(
-                            AudioObjectID(kAudioObjectSystemObject),
-                            CoreAudioProperty.address(kAudioHardwarePropertyDefaultSystemOutputDevice),
-                            id
-                        )
-                    }
-                    continuation.resume()
+                    continuation.resume(returning: Self.setDefaultOutputVerified(
+                        uid: targetUID,
+                        fallbackID: id,
+                        scope: scope,
+                        bluetooth: bluetoothTarget
+                    ))
                 }
             }
 
             refresh()
             AppAudioService.shared.finishSystemOutputChange()
+            if !switched {
+                // A later device notification may make the target writable;
+                // leave the service in a fully rebuilt state so the next click
+                // is safe rather than stranded behind `outputSwitchTask`.
+                scheduleRefresh()
+            }
             outputSwitchTask = nil
+        }
+    }
+
+    /// Resolve by UID after tearing aggregates down because HAL object IDs are
+    /// only live handles. Write, read back, and retry a bounded number of times
+    /// so one user click corresponds to one confirmed macOS output change.
+    nonisolated private static func setDefaultOutputVerified(
+        uid: String,
+        fallbackID: AudioObjectID,
+        scope: AudioObjectPropertyScope,
+        bluetooth: Bool
+    ) -> Bool {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        let outputAddress = CoreAudioProperty.address(kAudioHardwarePropertyDefaultOutputDevice)
+        let systemAddress = CoreAudioProperty.address(kAudioHardwarePropertyDefaultSystemOutputDevice)
+
+        for attempt in 0..<4 {
+            let targetID = outputDeviceID(for: uid) ?? fallbackID
+            let wrote = CoreAudioProperty.setValue(system, outputAddress, targetID)
+
+            let canTakeSystem = CoreAudioProperty.value(
+                targetID,
+                CoreAudioProperty.address(
+                    kAudioDevicePropertyDeviceCanBeDefaultSystemDevice,
+                    scope: scope
+                ),
+                seed: UInt32(0)
+            ) == 1
+            if canTakeSystem {
+                _ = CoreAudioProperty.setValue(system, systemAddress, targetID)
+            }
+
+            usleep(useconds_t(bluetooth ? 90_000 : 35_000))
+            let acceptedID = CoreAudioProperty.value(
+                system,
+                outputAddress,
+                seed: AudioObjectID(0)
+            ) ?? 0
+            let acceptedUID = CoreAudioProperty.string(
+                acceptedID,
+                CoreAudioProperty.address(kAudioDevicePropertyDeviceUID)
+            )
+            if wrote, acceptedUID == uid { return true }
+
+            if attempt < 3 {
+                usleep(useconds_t(bluetooth ? 120_000 : 55_000))
+            }
+        }
+        return false
+    }
+
+    nonisolated private static func outputDeviceID(for uid: String) -> AudioObjectID? {
+        CoreAudioProperty.objectIDs(
+            AudioObjectID(kAudioObjectSystemObject),
+            CoreAudioProperty.address(kAudioHardwarePropertyDevices)
+        ).first { id in
+            CoreAudioProperty.string(
+                id,
+                CoreAudioProperty.address(kAudioDevicePropertyDeviceUID)
+            ) == uid
         }
     }
 
@@ -676,11 +822,45 @@ final class SoundService {
         outputs.first { $0.isDefault }?.uid ?? outputs.first?.uid ?? ""
     }
 
+    /// Physical destinations offered by the per-app route picker. An existing
+    /// aggregate cannot be nested inside the private aggregate `AppMixer`
+    /// creates; users can reproduce it explicitly with Multi instead.
+    var routingOutputs: [Device] {
+        outputs.filter { !isAggregate(uid: $0.uid) }
+    }
+
     /// The device `AppMixer` has to render into. An array because a mixer can
     /// mirror to several at once, which is what per-app routing will use.
     var currentOutputDeviceUIDs: [String] {
         guard let device = outputs.first(where: { $0.isDefault }) ?? outputs.first else { return [] }
-        return [device.uid]
+        return expandedOutputUIDs(device.uid)
+    }
+
+    private func isAggregate(uid: String) -> Bool {
+        guard let id = deviceIDsByUID[uid] else { return false }
+        let transport = CoreAudioProperty.value(
+            id,
+            CoreAudioProperty.address(kAudioDevicePropertyTransportType),
+            seed: UInt32(0)
+        ) ?? 0
+        return transport == kAudioDeviceTransportTypeAggregate
+    }
+
+    /// CoreAudio forbids aggregate-inside-aggregate. Flatten a system
+    /// Multi-Output/Aggregate Device to the hardware UIDs `AppMixer` can wrap.
+    private func expandedOutputUIDs(_ uid: String) -> [String] {
+        guard isAggregate(uid: uid), let id = deviceIDsByUID[uid] else { return [uid] }
+        let members = CoreAudioProperty.objectIDs(
+            id,
+            CoreAudioProperty.address(kAudioAggregateDevicePropertyActiveSubDeviceList)
+        ).compactMap {
+            CoreAudioProperty.string(
+                $0,
+                CoreAudioProperty.address(kAudioDevicePropertyDeviceUID)
+            )
+        }
+        var seen: Set<String> = []
+        return members.filter { seen.insert($0).inserted }
     }
 
     /// Whether a device is reached over Bluetooth, from the ids cached by the

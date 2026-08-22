@@ -22,6 +22,11 @@ struct SoundScreen: View {
     /// whichever view lands in its place.
     @FocusState private var searchFocused: Bool
     @State private var hovered: String?
+    @State private var routingAppID: String?
+    /// AppKit dismisses a child popover before forwarding the outside click to
+    /// SwiftUI. Remember that dismissal so the same physical click cannot also
+    /// activate the header underneath it.
+    @State private var routePopoverDismissedAt = Date.distantPast
 
     private var service: SoundService { SoundService.shared }
     private var appAudio: AppAudioService { AppAudioService.shared }
@@ -51,22 +56,16 @@ struct SoundScreen: View {
             // watched for.
             SystemSoundService.shared.refresh()
         }
-        .onDisappear { service.stopTracking() }
+        .onDisappear {
+            routingAppID = nil
+            service.stopTracking()
+        }
     }
 
     /// The whole header row is the back button, title included: a bare chevron
     /// is a few points across and easy to miss.
     private var header: some View {
-        Button {
-            // One layer at a time: Add-an-app goes back to the app list, not
-            // out to the Sound screen.
-            searchFocused = false
-            switch page {
-            case .root: back()
-            case .addApp: page = .apps
-            case .apps: page = .root
-            }
-        } label: {
+        Button(action: navigateBack) {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 13, weight: .semibold))
@@ -82,6 +81,39 @@ struct SoundScreen: View {
         }
         .buttonStyle(.plain)
         .padding(.top, 6)
+    }
+
+    private func navigateBack() {
+        // The route picker is a nested AppKit popover whose presenter lives in
+        // the apps page. Removing that row in the same transaction leaves the
+        // outer menu temporarily fitting itself against a disappearing anchor.
+        // Consume this click as a dismissal; navigation requires a later click.
+        searchFocused = false
+        guard Date().timeIntervalSince(routePopoverDismissedAt) > 0.35 else { return }
+        guard routingAppID != nil else {
+            performBackNavigation()
+            return
+        }
+
+        // Match native/FineTune popover event handling: a click outside the
+        // child picker dismisses that picker and is not forwarded into the
+        // control underneath it. The next click can navigate normally.
+        var dismissal = Transaction(animation: nil)
+        dismissal.disablesAnimations = true
+        withTransaction(dismissal) {
+            routePopoverDismissedAt = Date()
+            routingAppID = nil
+        }
+    }
+
+    private func performBackNavigation() {
+        // One layer at a time: Add-an-app goes back to the app list, not out to
+        // the Sound screen.
+        switch page {
+        case .root: back()
+        case .addApp: page = .apps
+        case .apps: page = .root
+        }
     }
 
     private var title: String {
@@ -346,6 +378,44 @@ struct SoundScreen: View {
                     appAudio.cycleBoost(for: app.bundleID)
                 }
 
+                // A route can only be applied once CoreAudio exposes an
+                // active process for the app. Inactive pinned apps stay in the
+                // list, but do not offer a control that cannot act yet.
+                if app.isPlaying {
+                    Button {
+                        if routingAppID != app.bundleID {
+                            routePopoverDismissedAt = .distantPast
+                        }
+                        routingAppID = routingAppID == app.bundleID ? nil : app.bundleID
+                    } label: {
+                        routeTriggerIcon(for: app)
+                            .foregroundStyle(
+                                routingAppID == app.bundleID
+                                    ? AnyShapeStyle(state.accentColor)
+                                    : AnyShapeStyle(.secondary)
+                            )
+                            .frame(width: 20, height: 18)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(state.accentColor.opacity(
+                                        routingAppID == app.bundleID ? 0.14 : 0
+                                    ))
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Choose app output")
+                    .popover(
+                        isPresented: routePopoverPresented(for: app.bundleID),
+                        arrowEdge: .trailing
+                    ) {
+                        AppOutputRoutePopover(
+                            bundleID: app.bundleID,
+                            dismiss: { routingAppID = nil }
+                        )
+                    }
+                }
+
                 Button {
                     appAudio.remove(app.bundleID)
                 } label: {
@@ -370,6 +440,56 @@ struct SoundScreen: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func routeTriggerIcon(for app: AppAudioService.App) -> some View {
+        if app.outputMode == .multi {
+            let selected = service.routingOutputs.filter {
+                app.multiOutputDeviceUIDs.contains($0.uid)
+            }
+            if let first = selected.first {
+                AudioDeviceIcon(device: first, size: 17)
+                    .overlay(alignment: .bottomTrailing) {
+                        if selected.count > 1 {
+                            Text("\(selected.count)")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 3)
+                                .background(Capsule().fill(state.accentColor))
+                                .offset(x: 4, y: 3)
+                        }
+                    }
+            } else {
+                Image(systemName: "hifispeaker.2.fill")
+                    .font(.system(size: 13))
+                    .symbolRenderingMode(.hierarchical)
+            }
+        } else if app.outputDeviceUID == nil {
+            Image(systemName: "globe")
+                .font(.system(size: 13))
+                .symbolRenderingMode(.hierarchical)
+        } else if let device = service.routingOutputs.first(where: {
+            $0.uid == app.outputDeviceUID
+        }) {
+            AudioDeviceIcon(device: device, size: 17)
+        } else {
+            Image(systemName: "speaker.wave.2")
+                .font(.system(size: 13))
+                .symbolRenderingMode(.hierarchical)
+        }
+    }
+
+    private func routePopoverPresented(for bundleID: String) -> Binding<Bool> {
+        Binding(
+            get: { routingAppID == bundleID },
+            set: { presented in
+                if !presented, routingAppID == bundleID {
+                    routePopoverDismissedAt = Date()
+                    routingAppID = nil
+                }
+            }
+        )
     }
 
     // MARK: - Building blocks
@@ -444,6 +564,202 @@ struct SoundScreen: View {
         .onHover { inside in
             hovered = inside ? id : (hovered == id ? nil : hovered)
         }
+    }
+}
+
+/// FineTune-style per-app route picker, kept compact enough to sit beside
+/// OneBar's 300-point menu. Single can follow System Audio or pin one device;
+/// Multi mirrors to every checked physical destination.
+private struct AppOutputRoutePopover: View {
+    let bundleID: String
+    let dismiss: () -> Void
+
+    private var appAudio: AppAudioService { AppAudioService.shared }
+    private var sound: SoundService { SoundService.shared }
+
+    private var app: AppAudioService.App? {
+        appAudio.apps.first { $0.bundleID == bundleID }
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Picker("", selection: mode) {
+                Text("Single").tag(AppOutputMode.single)
+                Text("Multi").tag(AppOutputMode.multi)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Divider()
+
+            if app?.outputMode == .multi {
+                multiRows
+            } else {
+                singleRows
+            }
+        }
+        .padding(10)
+        .frame(width: 260)
+    }
+
+    private var mode: Binding<AppOutputMode> {
+        Binding(
+            get: { app?.outputMode ?? .single },
+            set: { appAudio.setOutputMode($0, for: bundleID) }
+        )
+    }
+
+    @ViewBuilder
+    private var singleRows: some View {
+        routeButton(
+            title: "System Audio",
+            subtitle: "Follows macOS default",
+            symbol: "globe",
+            device: nil,
+            selected: app?.outputDeviceUID == nil
+        ) {
+            appAudio.setSingleOutput(nil, for: bundleID)
+            dismiss()
+        }
+
+        ForEach(sound.routingOutputs) { device in
+            routeButton(
+                title: device.name,
+                symbol: "speaker.wave.2",
+                device: device,
+                selected: app?.outputDeviceUID == device.uid
+            ) {
+                appAudio.setSingleOutput(device.uid, for: bundleID)
+                dismiss()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var multiRows: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "square")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+                .frame(width: 14)
+            Image(systemName: "globe")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("System Audio")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Not available in Multi")
+                    .font(.system(size: 9))
+            }
+            .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+
+        ForEach(sound.routingOutputs) { device in
+            let selected = app?.multiOutputDeviceUIDs.contains(device.uid) == true
+            routeButton(
+                title: device.name,
+                symbol: "speaker.wave.2",
+                device: device,
+                selected: selected,
+                checkbox: true
+            ) {
+                appAudio.toggleMultiOutput(device.uid, for: bundleID)
+            }
+        }
+
+        if sound.routingOutputs.count < 2 {
+            Text("Connect another output to mirror this app to multiple devices.")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private func routeButton(
+        title: String,
+        subtitle: String? = nil,
+        symbol: String,
+        device: SoundService.Device?,
+        selected: Bool,
+        checkbox: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Group {
+                    if checkbox {
+                        Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    } else if selected {
+                        Image(systemName: "checkmark")
+                    } else {
+                        Color.clear
+                    }
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(selected ? AnyShapeStyle(AppState.shared.accentColor) : AnyShapeStyle(.secondary))
+                .frame(width: 14, height: 14)
+
+                if let device {
+                    AudioDeviceIcon(device: device, size: 16)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 13))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 16)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if device?.isDefault == true {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct AudioDeviceIcon: View {
+    let device: SoundService.Device
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let icon = device.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "speaker.wave.2")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .symbolRenderingMode(.hierarchical)
+            }
+        }
+        .frame(width: size, height: size)
     }
 }
 
