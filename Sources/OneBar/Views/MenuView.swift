@@ -128,6 +128,7 @@ struct MenuView: View {
 
             HStack {
                 Button("Preferences") {
+                    MenuBarPopover.close()
                     openWindow(id: "preferences")
                     NSApp.activate(ignoringOtherApps: true)
                 }
@@ -259,14 +260,23 @@ struct MenuView: View {
     private var scanRow: some View {
         HStack(spacing: 8) {
             scanButton("Scan Text", systemImage: "text.viewfinder") {
-                ScreenCaptureService.scan(.text)
+                scan(.text)
             }
             scanButton("Scan QR", systemImage: "qrcode.viewfinder") {
-                ScreenCaptureService.scan(.qr)
+                scan(.qr)
             }
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 10)
+    }
+
+    /// The menu has to be gone before the screenshot freezes the screen, or it
+    /// ends up in the region you are selecting from.
+    private func scan(_ mode: ScreenCaptureService.Mode) {
+        Task { @MainActor in
+            await MenuBarPopover.closeAndWait()
+            ScreenCaptureService.scan(mode)
+        }
     }
 
     private func scanButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
