@@ -7,11 +7,13 @@ struct PreferencesWindow: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             ClipboardPane()
                 .tabItem { Label("Clipboard", systemImage: "doc.on.clipboard") }
+            ShelfPane()
+                .tabItem { Label("Shelf", systemImage: "tray.full") }
             AutomationPane()
                 .tabItem { Label("Automation", systemImage: "cursorarrow.motionlines") }
             ShortcutsPane()
                 .tabItem { Label("Shortcuts", systemImage: "command") }
         }
-        .frame(width: 520, height: 460)
+        .frame(width: 620, height: 520)
     }
 }

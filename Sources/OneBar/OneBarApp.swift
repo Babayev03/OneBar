@@ -92,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppMixer.destroyLegacyGroupDevices()
         SoundService.shared.start()
         AppAudioService.shared.start()
+        ShelfManager.shared.start()
         HotkeyManager.shared.registerFromStore()
     }
 
@@ -111,6 +112,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Taps mute the apps they are on, so leaving one behind would leave an
         // app silent with nothing left to un-silence it.
         AppAudioService.shared.tearDown()
+        // Shelves are transient by design; this also clears the files OneBar
+        // wrote for dropped text and images.
+        ShelfManager.shared.stop()
         ClipboardManager.shared.saveNow()
     }
 }

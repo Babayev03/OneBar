@@ -203,6 +203,42 @@ final class AppState {
         didSet { UserDefaults.standard.set(quitShortcutBehavior.rawValue, forKey: "quitShortcutBehavior") }
     }
 
+    // MARK: - Shelf
+
+    /// Master switch for the drag-and-drop shelf.
+    var shelfEnabled: Bool {
+        didSet { UserDefaults.standard.set(shelfEnabled, forKey: "shelfEnabled") }
+    }
+
+    /// Shake the cursor mid-drag to summon a shelf under it.
+    var shelfShakeEnabled: Bool {
+        didSet { UserDefaults.standard.set(shelfShakeEnabled, forKey: "shelfShakeEnabled") }
+    }
+
+    var shelfShakeSensitivity: ShakeSensitivity {
+        didSet { UserDefaults.standard.set(shelfShakeSensitivity.rawValue, forKey: "shelfShakeSensitivity") }
+    }
+
+    /// Where a shelf lands when it was not summoned by a shake.
+    var shelfLocation: ShelfLocation {
+        didSet { UserDefaults.standard.set(shelfLocation.rawValue, forKey: "shelfLocation") }
+    }
+
+    /// Drop formatted text as plain text rather than keeping its styling.
+    var shelfPlainText: Bool {
+        didSet { UserDefaults.standard.set(shelfPlainText, forKey: "shelfPlainText") }
+    }
+
+    /// Override the macOS default of moving within a volume and copying across
+    /// one, so dragging out never removes the original.
+    var shelfAlwaysCopy: Bool {
+        didSet { UserDefaults.standard.set(shelfAlwaysCopy, forKey: "shelfAlwaysCopy") }
+    }
+
+    var shelfCloseBehavior: ShelfCloseBehavior {
+        didSet { UserDefaults.standard.set(shelfCloseBehavior.rawValue, forKey: "shelfCloseBehavior") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -274,7 +310,14 @@ final class AppState {
             "brightnessSoftwareFallback": true,
             "colorPickerFormat": "hex",
             "quitShortcutBehavior": "ask",
-            "accentName": "blue"
+            "accentName": "blue",
+            "shelfEnabled": true,
+            "shelfShakeEnabled": true,
+            "shelfShakeSensitivity": "normal",
+            "shelfLocation": "cursor",
+            "shelfPlainText": false,
+            "shelfAlwaysCopy": false,
+            "shelfCloseBehavior": "whenMoved"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
         clipboardEnabled = defaults.bool(forKey: "clipboardEnabled")
@@ -316,5 +359,12 @@ final class AppState {
         colorPickerFormat = ColorFormat(rawValue: defaults.string(forKey: "colorPickerFormat") ?? "") ?? .hex
         quitShortcutBehavior = QuitShortcutBehavior(rawValue: defaults.string(forKey: "quitShortcutBehavior") ?? "") ?? .ask
         accentName = defaults.string(forKey: "accentName") ?? "blue"
+        shelfEnabled = defaults.bool(forKey: "shelfEnabled")
+        shelfShakeEnabled = defaults.bool(forKey: "shelfShakeEnabled")
+        shelfShakeSensitivity = ShakeSensitivity(rawValue: defaults.string(forKey: "shelfShakeSensitivity") ?? "") ?? .normal
+        shelfLocation = ShelfLocation(rawValue: defaults.string(forKey: "shelfLocation") ?? "") ?? .cursor
+        shelfPlainText = defaults.bool(forKey: "shelfPlainText")
+        shelfAlwaysCopy = defaults.bool(forKey: "shelfAlwaysCopy")
+        shelfCloseBehavior = ShelfCloseBehavior(rawValue: defaults.string(forKey: "shelfCloseBehavior") ?? "") ?? .whenMoved
     }
 }
