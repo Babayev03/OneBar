@@ -239,6 +239,22 @@ final class AppState {
         didSet { UserDefaults.standard.set(shelfCloseBehavior.rawValue, forKey: "shelfCloseBehavior") }
     }
 
+    /// Give each open shelf its own colour so two are told apart at a glance.
+    var shelfColorLabels: Bool {
+        didSet { UserDefaults.standard.set(shelfColorLabels, forKey: "shelfColorLabels") }
+    }
+
+    /// Off by default: a shelf usually appears mid-drag, and taking focus there
+    /// would end the drag that summoned it.
+    var shelfTakesFocus: Bool {
+        didSet { UserDefaults.standard.set(shelfTakesFocus, forKey: "shelfTakesFocus") }
+    }
+
+    /// Layout a new shelf starts in; each shelf can then be switched on its own.
+    var shelfLayout: ShelfLayout {
+        didSet { UserDefaults.standard.set(shelfLayout.rawValue, forKey: "shelfLayout") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -317,7 +333,10 @@ final class AppState {
             "shelfLocation": "cursor",
             "shelfPlainText": false,
             "shelfAlwaysCopy": false,
-            "shelfCloseBehavior": "whenMoved"
+            "shelfCloseBehavior": "whenMoved",
+            "shelfColorLabels": true,
+            "shelfTakesFocus": false,
+            "shelfLayout": "grid"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
         clipboardEnabled = defaults.bool(forKey: "clipboardEnabled")
@@ -366,5 +385,8 @@ final class AppState {
         shelfPlainText = defaults.bool(forKey: "shelfPlainText")
         shelfAlwaysCopy = defaults.bool(forKey: "shelfAlwaysCopy")
         shelfCloseBehavior = ShelfCloseBehavior(rawValue: defaults.string(forKey: "shelfCloseBehavior") ?? "") ?? .whenMoved
+        shelfColorLabels = defaults.bool(forKey: "shelfColorLabels")
+        shelfTakesFocus = defaults.bool(forKey: "shelfTakesFocus")
+        shelfLayout = ShelfLayout(rawValue: defaults.string(forKey: "shelfLayout") ?? "") ?? .grid
     }
 }

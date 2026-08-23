@@ -1,4 +1,5 @@
 import AppKit
+import Quartz
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -51,11 +52,32 @@ final class ShelfDropView: NSView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         controller?.model.isDropTargeted = false
-        guard let controller else { return false }
-        ShelfItemReader.read(from: sender) { items in
+        guard controller != nil else { return false }
+        ShelfItemReader.read(from: sender) { [weak controller] items in
+            guard let controller, controller.isActive else {
+                ShelfStore.shared.discard(items)
+                return
+            }
             controller.add(items)
         }
         return true
+    }
+
+    // MARK: - Quick Look
+
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+        !(controller?.previewURLs.isEmpty ?? true)
+    }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = self
+        panel.delegate = self
+    }
+
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = nil
+        panel.delegate = nil
+        controller?.previewDidEnd()
     }
 
     /// A drag out of our own shelf is a rearrange, not a copy of the file into
@@ -63,6 +85,17 @@ final class ShelfDropView: NSView {
     private func operation(for sender: NSDraggingInfo) -> NSDragOperation {
         if (sender.draggingSource as? ShelfDragSourceView)?.controller === controller { return [] }
         return .copy
+    }
+}
+
+extension ShelfDropView: QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        controller?.previewURLs.count ?? 0
+    }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        guard let urls = controller?.previewURLs, urls.indices.contains(index) else { return nil }
+        return urls[index] as NSURL
     }
 }
 
@@ -76,15 +109,9 @@ enum ShelfItemReader {
 
         // File URLs first: they are the common case and the only kind that can
         // be referenced rather than copied.
-        if let urls = pasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL], !urls.isEmpty {
-            let items = urls.compactMap { fileItem(for: $0) }
-            if !items.isEmpty {
-                completion(items)
-                return
-            }
+        if let items = fileItems(from: pasteboard) {
+            completion(items)
+            return
         }
 
         // Photos, Mail and some browsers hand over a promise instead of a file.
@@ -97,22 +124,35 @@ enum ShelfItemReader {
             return
         }
 
-        if let item = imageItem(from: pasteboard) {
-            completion([item])
-            return
-        }
+        read(from: pasteboard, completion: completion)
+    }
 
-        if let item = linkItem(from: pasteboard) {
+    /// The equivalent reader for Add/New From Clipboard, where file promises
+    /// cannot occur.
+    static func read(
+        from pasteboard: NSPasteboard,
+        completion: @escaping @MainActor ([ShelfItem]) -> Void
+    ) {
+        if let items = fileItems(from: pasteboard) {
+            completion(items)
+        } else if let item = imageItem(from: pasteboard) {
             completion([item])
-            return
-        }
-
-        if let item = textItem(from: pasteboard) {
+        } else if let item = linkItem(from: pasteboard) {
             completion([item])
-            return
+        } else if let item = textItem(from: pasteboard) {
+            completion([item])
+        } else {
+            completion([])
         }
+    }
 
-        completion([])
+    private static func fileItems(from pasteboard: NSPasteboard) -> [ShelfItem]? {
+        guard let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty else { return nil }
+        let items = urls.compactMap { fileItem(for: $0) }
+        return items.isEmpty ? nil : items
     }
 
     // MARK: - Item builders
@@ -139,24 +179,45 @@ enum ShelfItemReader {
             return
         }
         let queue = OperationQueue()
+        // Calling in a promise populates `fileNames`, and one legacy receiver
+        // can represent several files. Hold callbacks until the true expected
+        // count is known so the queue cannot be released after the first file.
+        queue.isSuspended = true
+        let deliveryID = UUID()
+        promiseQueues[deliveryID] = queue
+        var remaining = 0
+        var deliveredAny = false
         for receiver in receivers {
             receiver.receivePromisedFiles(
                 atDestination: destination,
                 options: [:],
                 operationQueue: queue
             ) { url, error in
-                guard error == nil else { return }
-                // The reader runs on `queue`, and everything below it — the
-                // store, the shelf — is main-actor.
                 Task { @MainActor in
-                    guard var item = fileItem(for: url) else { return }
-                    // We wrote it, so it is ours to clean up when the item goes.
+                    defer {
+                        remaining -= 1
+                        if remaining == 0 {
+                            promiseQueues[deliveryID] = nil
+                            if !deliveredAny {
+                                ShelfStore.shared.discardPromiseDestination(destination)
+                            }
+                        }
+                    }
+                    guard error == nil, var item = fileItem(for: url) else { return }
                     item.isMaterialised = true
+                    deliveredAny = true
                     completion([item])
                 }
             }
+            // AppKit promises a callback even for cancellation or failure.
+            // Broken legacy providers sometimes omit names, so retain one
+            // expected callback for that receiver as a safe fallback.
+            remaining += max(receiver.fileNames.count, 1)
         }
+        queue.isSuspended = false
     }
+
+    private static var promiseQueues: [UUID: OperationQueue] = [:]
 
     private static func imageItem(from pasteboard: NSPasteboard) -> ShelfItem? {
         let png: Data?
@@ -232,4 +293,3 @@ enum ShelfItemReader {
 private extension NSPasteboard.PasteboardType {
     static let urlName = NSPasteboard.PasteboardType("public.url-name")
 }
-

@@ -1,37 +1,90 @@
 import AppKit
 import Observation
+import Quartz
 import SwiftUI
+
+enum ShelfRoute {
+    case items
+    case customize
+}
 
 @MainActor
 @Observable
 final class ShelfModel {
     var items: [ShelfItem] = []
     var selection: Set<UUID> = []
+    var selectionAnchor: UUID?
     var isDropTargeted = false
     var isPresented = false
 
+    var route: ShelfRoute = .items
+    var name: String?
+    var colorName: String?
+    var colorSource: ShelfColorSource = .automatic
+    var isPinned = false
+    var layout: ShelfLayout = .grid
+    var keepInSpace = false
+
     var totalSize: Int { items.compactMap(\.byteSize).reduce(0, +) }
+
+    var selectedSize: Int {
+        items.filter { selection.contains($0.id) }.compactMap(\.byteSize).reduce(0, +)
+    }
+
+    var color: Color { ShelfManager.color(named: colorName) }
+
+    var title: String {
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+        return "Shelf"
+    }
 }
 
 /// One shelf: its panel, its placement, and the two halves of drag and drop.
 @MainActor
 final class ShelfController {
-    let id = UUID()
+    let id: UUID
     let model = ShelfModel()
+    private(set) var isActive = true
 
     static let width: CGFloat = 300
     private static let columns = 3
-    private static let cellHeight: CGFloat = 84
+    static let cellHeight: CGFloat = 84
     private static let cellSpacing: CGFloat = 8
+    static let rowHeight: CGFloat = 34
     private static let headerHeight: CGFloat = 38
     private static let footerHeight: CGFloat = 26
     private static let maximumHeight: CGFloat = 440
 
     private var panel: NSPanel?
     private var keyMonitor: Any?
+    private var moveObserver: NSObjectProtocol?
+    private var positionPersistTask: Task<Void, Never>?
+    private var previewObserver: NSObjectProtocol?
+    private var previouslyFocusedApplication: NSRunningApplication?
     private var draggedOut: [ShelfItem] = []
 
-    init(at point: NSPoint?) {
+    convenience init(at point: NSPoint?) {
+        self.init(snapshot: nil, at: point)
+    }
+
+    convenience init(snapshot: ShelfSnapshot) {
+        self.init(snapshot: snapshot, at: nil)
+    }
+
+    private init(snapshot: ShelfSnapshot?, at point: NSPoint?) {
+        id = snapshot?.id ?? UUID()
+        if let snapshot {
+            model.items = snapshot.items
+            model.name = snapshot.name
+            model.colorName = snapshot.colorName
+            model.colorSource = snapshot.colorSource
+            model.isPinned = snapshot.isPinned
+            model.layout = snapshot.layout
+            model.keepInSpace = snapshot.keepInSpace
+        } else {
+            model.layout = AppState.shared.shelfLayout
+        }
+
         let panel = ShelfPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.width, height: Self.headerHeight + 92),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -59,14 +112,29 @@ final class ShelfController {
         panel.contentView = drop
         self.panel = panel
 
-        position(near: point)
+        panel.setContentSize(NSSize(width: Self.width, height: desiredHeight()))
+        if let snapshot, let x = snapshot.originX, let y = snapshot.originY {
+            panel.setFrame(clampedToScreen(NSRect(
+                origin: NSPoint(x: x, y: y),
+                size: panel.frame.size
+            )), display: false)
+        } else {
+            position(near: point)
+        }
         // Ordered front rather than made key: the shelf appears in the middle
         // of a drag out of another app, and taking focus there would end it.
-        panel.orderFrontRegardless()
+        // The preference restores the old Dropover behaviour for anyone who
+        // wants to type at it the moment it opens.
+        if AppState.shared.shelfTakesFocus {
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            panel.orderFrontRegardless()
+        }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             model.isPresented = true
         }
         installKeyMonitor()
+        observePosition(of: panel)
     }
 
     // MARK: - Keyboard
@@ -82,50 +150,157 @@ final class ShelfController {
     }
 
     private func handle(_ event: NSEvent) -> Bool {
-        let command = event.modifierFlags.contains(.command)
-        switch event.keyCode {
-        case 53:                                  // Esc
-            close()
+        if event.keyCode == 53 {
+            if model.route == .customize { showItems() } else { close() }
             return true
-        case 51, 117:                             // Delete, forward delete
+        }
+        // The field editor must keep ordinary typing and its own edit commands.
+        if panel?.firstResponder is NSTextView { return false }
+
+        let store = ShortcutStore.shared
+        func matches(_ action: ShortcutAction) -> Bool {
+            store.binding(for: action).matches(event)
+        }
+
+        if matches(.shelfCloseAll) { ShelfManager.shared.closeAll(); return true }
+        if matches(.shelfClose) { close(); return true }
+        if matches(.shelfCustomize) { showCustomize(); return true }
+        if matches(.shelfNewFromClipboard) { ShelfManager.shared.newShelfFromClipboard(); return true }
+        if matches(.shelfSelectAll) {
+            model.selection = Set(model.items.map(\.id))
+            model.selectionAnchor = model.items.first?.id
+            return true
+        }
+        if matches(.shelfClear) { clear(); return true }
+        if matches(.shelfRemove) {
             guard !model.selection.isEmpty else { return false }
             remove(model.selection)
             return true
-        case 0 where command:                     // ⌘A
-            model.selection = Set(model.items.map(\.id))
-            return true
-        default:
-            return false
         }
+        if matches(.shelfCopy) { copySelection(); return true }
+        if matches(.shelfPaste) { addFromClipboard(); return true }
+        if matches(.shelfQuickLook) { quickLook(); return true }
+        return false
+    }
+
+    // MARK: - Clipboard and Quick Look
+
+    private var actionItems: [ShelfItem] {
+        model.selection.isEmpty
+            ? model.items
+            : model.items.filter { model.selection.contains($0.id) }
+    }
+
+    func copySelection() {
+        let items = actionItems
+        guard !items.isEmpty else { return }
+        let writers = items.compactMap { pasteboardWriter(for: $0) }
+        guard !writers.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects(writers)
+        HUD.show(items.count == 1 ? "Copied" : "Copied \(items.count) items", symbol: "doc.on.doc")
+    }
+
+    func addFromClipboard() {
+        ShelfItemReader.read(from: NSPasteboard.general) { [weak self] items in
+            guard let self, self.isActive else {
+                ShelfStore.shared.discard(items)
+                return
+            }
+            if items.isEmpty {
+                HUD.show("Nothing on the clipboard", symbol: "exclamationmark.circle")
+            } else {
+                self.add(items)
+            }
+        }
+    }
+
+    func quickLook() {
+        guard !previewURLs.isEmpty, let panel else { return }
+        if let preview = QLPreviewPanel.shared(), preview.isVisible {
+            preview.orderOut(nil)
+            stopPreviewObservation(restoreFocus: true)
+            return
+        }
+
+        previouslyFocusedApplication = NSWorkspace.shared.frontmostApplication
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        guard let preview = QLPreviewPanel.shared() else {
+            restorePreviousApplication()
+            return
+        }
+        previewObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: preview,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self, weak preview] in
+                // Resigning key can also mean the user clicked another window
+                // while keeping Quick Look open. Restore only after it hides.
+                try? await Task.sleep(for: .milliseconds(50))
+                guard preview?.isVisible != true else { return }
+                self?.stopPreviewObservation(restoreFocus: true)
+            }
+        }
+        preview.makeKeyAndOrderFront(nil)
+    }
+
+    var previewURLs: [URL] { actionItems.compactMap { $0.resolveURL() } }
+
+    /// Quick Look calls this when the shelf gives up preview-panel control.
+    /// It is the reliable close path; the window observer above remains a
+    /// fallback for OS versions that only hide the shared panel.
+    func previewDidEnd() {
+        stopPreviewObservation(restoreFocus: true)
+    }
+
+    private func stopPreviewObservation(restoreFocus: Bool) {
+        if let previewObserver { NotificationCenter.default.removeObserver(previewObserver) }
+        previewObserver = nil
+        if restoreFocus { restorePreviousApplication() }
+        else { previouslyFocusedApplication = nil }
+    }
+
+    private func restorePreviousApplication() {
+        let application = previouslyFocusedApplication
+        previouslyFocusedApplication = nil
+        guard let application, application != NSRunningApplication.current else { return }
+        application.activate(options: [])
     }
 
     // MARK: - Contents
 
-    func add(_ incoming: [ShelfItem]) {
-        guard !incoming.isEmpty else { return }
-        var added = false
-        for item in incoming where !contains(item) {
-            model.items.append(item)
-            added = true
+    @discardableResult
+    func add(_ incoming: [ShelfItem]) -> Bool {
+        guard isActive, !incoming.isEmpty else {
+            ShelfStore.shared.discard(incoming)
+            return false
         }
+        var added = false
+        var rejected: [ShelfItem] = []
+        for item in incoming {
+            if contains(item) {
+                rejected.append(item)
+            } else {
+                model.items.append(item)
+                added = true
+            }
+        }
+        ShelfStore.shared.discard(rejected, keeping: model.items)
         guard added else {
             HUD.show("Already on the shelf", symbol: "tray.full")
-            return
+            return false
         }
+        model.route = .items
         resize()
+        persistIfPinned()
+        return true
     }
 
     private func contains(_ item: ShelfItem) -> Bool {
-        model.items.contains { existing in
-            switch item.kind {
-            case .file, .image:
-                return existing.path != nil && existing.path == item.path
-            case .link:
-                return existing.linkString == item.linkString
-            case .text:
-                return existing.kind == .text && existing.text == item.text
-            }
-        }
+        model.items.contains { item.hasSameShelfIdentity(as: $0) }
     }
 
     func remove(_ ids: Set<UUID>, deletingFiles: Bool = true) {
@@ -133,9 +308,13 @@ final class ShelfController {
         guard !going.isEmpty else { return }
         model.items.removeAll { ids.contains($0.id) }
         model.selection.subtract(ids)
+        if let anchor = model.selectionAnchor, ids.contains(anchor) {
+            model.selectionAnchor = model.selection.first
+        }
         ShelfThumbnails.shared.forget(going)
         if deletingFiles { ShelfStore.shared.discard(going) }
         resize()
+        persistIfPinned()
     }
 
     func clear() {
@@ -146,15 +325,121 @@ final class ShelfController {
         ShelfManager.shared.close(self)
     }
 
-    /// Called by the manager, which owns the lifetime.
+    /// Called by the manager, which owns the lifetime — and which decides
+    /// whether the items are kept, so nothing is deleted here.
     func tearDown() {
+        isActive = false
+        positionPersistTask?.cancel()
+        positionPersistTask = nil
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
+        if let moveObserver { NotificationCenter.default.removeObserver(moveObserver) }
+        moveObserver = nil
+        stopPreviewObservation(restoreFocus: false)
         ShelfThumbnails.shared.forget(model.items)
-        ShelfStore.shared.discard(model.items)
         panel?.orderOut(nil)
         panel?.contentView = nil
         panel = nil
+    }
+
+    func snapshot() -> ShelfSnapshot {
+        ShelfSnapshot(
+            id: id,
+            name: model.name,
+            colorName: model.colorName,
+            colorSource: model.colorSource,
+            items: model.items,
+            originX: panel.map { Double($0.frame.origin.x) },
+            originY: panel.map { Double($0.frame.origin.y) },
+            isPinned: model.isPinned,
+            layout: model.layout,
+            keepInSpace: model.keepInSpace,
+            closedAt: nil
+        )
+    }
+
+    func togglePin() {
+        model.isPinned.toggle()
+        ShelfManager.shared.persist()
+        HUD.show(model.isPinned ? "Shelf pinned" : "Shelf unpinned",
+                 symbol: model.isPinned ? "pin.fill" : "pin.slash")
+    }
+
+    func setLayout(_ layout: ShelfLayout) {
+        model.layout = layout
+        resize()
+        persistIfPinned()
+    }
+
+    func setName(_ name: String?) {
+        model.name = name
+        persistIfPinned()
+    }
+
+    func setColor(_ name: String, source: ShelfColorSource = .user) {
+        model.colorName = name
+        model.colorSource = source
+        persistIfPinned()
+    }
+
+    func applyAutomaticColor(_ name: String?) {
+        guard model.colorSource == .automatic else { return }
+        model.colorName = name
+        persistIfPinned()
+    }
+
+    func setKeepInSpace(_ keepInSpace: Bool) {
+        model.keepInSpace = keepInSpace
+        persistIfPinned()
+    }
+
+    private func persistIfPinned() {
+        guard model.isPinned else { return }
+        ShelfManager.shared.persist()
+    }
+
+    func showCustomize() {
+        model.route = .customize
+        resize()
+        // Focus is needed for the name field, and only here: the shelf is
+        // otherwise deliberately never made key.
+        panel?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func showItems() {
+        model.route = .items
+        resize()
+    }
+
+    /// Pulls the items from the last shelf that was closed into this one — the
+    /// undo for closing a shelf you still needed.
+    func restorePrevious() {
+        guard let snapshot = ShelfManager.shared.mostRecentlyClosed else { return }
+        ShelfManager.shared.forgetKeepingFiles(snapshot)
+        add(snapshot.items)
+    }
+
+    // MARK: - Window persistence
+
+    private func observePosition(of panel: NSPanel) {
+        moveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.schedulePositionPersistence() }
+        }
+    }
+
+    private func schedulePositionPersistence() {
+        guard model.isPinned else { return }
+        positionPersistTask?.cancel()
+        positionPersistTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            self?.persistIfPinned()
+        }
     }
 
     // MARK: - Drag out
@@ -236,12 +521,25 @@ final class ShelfController {
     }
 
     private func desiredHeight() -> CGFloat {
-        guard !model.items.isEmpty else { return Self.headerHeight + 92 }
-        let rows = (model.items.count + Self.columns - 1) / Self.columns
-        let grid = CGFloat(rows) * Self.cellHeight
-            + CGFloat(max(0, rows - 1)) * Self.cellSpacing
-            + 20
-        return min(Self.headerHeight + Self.footerHeight + grid, Self.maximumHeight)
+        if model.route == .customize { return Self.headerHeight + 216 }
+        guard !model.items.isEmpty else {
+            // The restore button only appears when there is something to
+            // restore, and it needs the room.
+            let restore: CGFloat = ShelfManager.shared.mostRecentlyClosed == nil ? 0 : 22
+            return Self.headerHeight + 92 + restore
+        }
+        let content: CGFloat
+        switch model.layout {
+        case .grid:
+            let rows = (model.items.count + Self.columns - 1) / Self.columns
+            content = CGFloat(rows) * Self.cellHeight
+                + CGFloat(max(0, rows - 1)) * Self.cellSpacing
+                + 20
+        case .list:
+            let count = CGFloat(model.items.count)
+            content = count * Self.rowHeight + max(0, count - 1) * 4 + 20
+        }
+        return min(Self.headerHeight + Self.footerHeight + content, Self.maximumHeight)
     }
 
     private func position(near point: NSPoint?) {
@@ -286,6 +584,7 @@ final class ShelfController {
 /// field and the keyboard actions that come with it.
 private final class ShelfPanel: NSPanel {
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    /// Needed for the caret and focus ring in the Customize name field —
+    /// the same reason `CanvasWindow` overrides it.
+    override var canBecomeMain: Bool { true }
 }
-

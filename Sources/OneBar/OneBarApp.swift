@@ -112,8 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Taps mute the apps they are on, so leaving one behind would leave an
         // app silent with nothing left to un-silence it.
         AppAudioService.shared.tearDown()
-        // Shelves are transient by design; this also clears the files OneBar
-        // wrote for dropped text and images.
+        // Persist pinned shelves, then clear only transient files that belong
+        // to unpinned shelves. Referenced user files are never removed.
         ShelfManager.shared.stop()
         ClipboardManager.shared.saveNow()
     }

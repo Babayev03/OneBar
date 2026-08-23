@@ -12,9 +12,11 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
     weak var controller: ShelfController?
     var itemID: UUID?
     var onSelect: ((NSEvent) -> Void)?
+    var onClickRelease: ((NSEvent) -> Void)?
     var onDoubleClick: (() -> Void)?
 
     private var mouseDownPoint: NSPoint?
+    private var beganDrag = false
 
     /// The panel is movable by its background, and AppKit decides that from the
     /// view under the pointer before the view's own tracking runs — so without
@@ -25,8 +27,14 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
 
     override func mouseDown(with event: NSEvent) {
         mouseDownPoint = event.locationInWindow
+        beganDrag = false
         onSelect?(event)
-        if event.clickCount == 2 { onDoubleClick?() }
+        if ShelfSelectionLogic.shouldOpen(
+            clickCount: event.clickCount,
+            modifiers: event.modifierFlags
+        ) {
+            onDoubleClick?()
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -36,11 +44,14 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
         // hand starts a drag nobody asked for.
         guard hypot(point.x - start.x, point.y - start.y) > 3 else { return }
         mouseDownPoint = nil
+        beganDrag = true
         beginDrag(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if !beganDrag { onClickRelease?(event) }
         mouseDownPoint = nil
+        beganDrag = false
     }
 
     private func beginDrag(with event: NSEvent) {
@@ -100,6 +111,7 @@ struct ShelfDragSource: NSViewRepresentable {
     let itemID: UUID
     let controller: ShelfController
     var onSelect: (NSEvent) -> Void
+    var onClickRelease: (NSEvent) -> Void
     var onDoubleClick: () -> Void
 
     func makeNSView(context: Context) -> ShelfDragSourceView {
@@ -107,6 +119,7 @@ struct ShelfDragSource: NSViewRepresentable {
         view.itemID = itemID
         view.controller = controller
         view.onSelect = onSelect
+        view.onClickRelease = onClickRelease
         view.onDoubleClick = onDoubleClick
         return view
     }
@@ -115,7 +128,7 @@ struct ShelfDragSource: NSViewRepresentable {
         view.itemID = itemID
         view.controller = controller
         view.onSelect = onSelect
+        view.onClickRelease = onClickRelease
         view.onDoubleClick = onDoubleClick
     }
 }
-

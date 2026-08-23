@@ -56,6 +56,16 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case pasteOriginal
     case pastePlain
     case pastePlainDirect
+    case shelfClose
+    case shelfCloseAll
+    case shelfQuickLook
+    case shelfRemove
+    case shelfClear
+    case shelfCopy
+    case shelfPaste
+    case shelfSelectAll
+    case shelfCustomize
+    case shelfNewFromClipboard
 
     var id: String { rawValue }
 
@@ -72,6 +82,16 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .pasteOriginal: return "Paste original"
         case .pastePlain: return "Paste plain text"
         case .pastePlainDirect: return "Paste plain text directly"
+        case .shelfClose: return "Close shelf"
+        case .shelfCloseAll: return "Close all shelves"
+        case .shelfQuickLook: return "Quick Look"
+        case .shelfRemove: return "Remove from shelf"
+        case .shelfClear: return "Clear shelf"
+        case .shelfCopy: return "Copy selection"
+        case .shelfPaste: return "Add from clipboard"
+        case .shelfSelectAll: return "Select all"
+        case .shelfCustomize: return "Customize shelf"
+        case .shelfNewFromClipboard: return "New shelf from clipboard"
         }
     }
 
@@ -88,6 +108,16 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .pasteOriginal: return KeyBinding(keyCode: 31)                     // O
         case .pastePlain: return KeyBinding(keyCode: 35)                        // P
         case .pastePlainDirect: return KeyBinding(keyCode: 9, modifiers: [.control]) // ^V
+        case .shelfClose: return KeyBinding(keyCode: 13, modifiers: [.command])  // ⌘W
+        case .shelfCloseAll: return KeyBinding(keyCode: 13, modifiers: [.command, .shift]) // ⇧⌘W
+        case .shelfQuickLook: return KeyBinding(keyCode: 49)                     // Space
+        case .shelfRemove: return KeyBinding(keyCode: 51)                        // Delete
+        case .shelfClear: return KeyBinding(keyCode: 51, modifiers: [.command])  // ⌘Delete
+        case .shelfCopy: return KeyBinding(keyCode: 8, modifiers: [.command])    // ⌘C
+        case .shelfPaste: return KeyBinding(keyCode: 9, modifiers: [.command])   // ⌘V
+        case .shelfSelectAll: return KeyBinding(keyCode: 0, modifiers: [.command]) // ⌘A
+        case .shelfCustomize: return KeyBinding(keyCode: 34, modifiers: [.command]) // ⌘I
+        case .shelfNewFromClipboard: return KeyBinding(keyCode: 45, modifiers: [.command]) // ⌘N
         }
     }
 
@@ -97,6 +127,26 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     var isGlobal: Bool { Self.globals.contains(self) }
 
     static let globals: Set<ShortcutAction> = [.openPanel, .openClickPoints, .turboClick, .pickColor]
+
+    /// Which list the action is shown and matched under. Shelf keys are matched
+    /// by the focused shelf's own monitor; none of them is registered
+    /// system-wide, so they are free to be bare keys like Space and Delete.
+    enum Section: String, CaseIterable, Identifiable {
+        case global = "Global"
+        case clipboard = "Clipboard History"
+        case shelf = "Shelf"
+
+        var id: String { rawValue }
+    }
+
+    var section: Section {
+        if isGlobal { return .global }
+        return rawValue.hasPrefix("shelf") ? .shelf : .clipboard
+    }
+
+    static func actions(in section: Section) -> [ShortcutAction] {
+        allCases.filter { $0.section == section }
+    }
 }
 
 @MainActor

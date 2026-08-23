@@ -5,6 +5,7 @@ struct ShelfPane: View {
     private enum Section: String, CaseIterable, Identifiable {
         case activation = "Activation"
         case interaction = "Interaction"
+        case shelves = "Shelves"
 
         var id: String { rawValue }
     }
@@ -30,6 +31,7 @@ struct ShelfPane: View {
                     switch section {
                     case .activation: activation
                     case .interaction: interaction
+                    case .shelves: shelves
                     }
                 }
                 .padding(.horizontal, 20)
@@ -138,6 +140,21 @@ struct ShelfPane: View {
                     ) {
                         Toggle("", isOn: alwaysCopyBinding).toggleStyle(.switch).labelsHidden()
                     }
+                    Divider()
+                    row("Use colour to distinguish shelves", subtitle: "Gives each open shelf its own indicator colour. A shelf you colour yourself keeps the colour you picked.") {
+                        Toggle("", isOn: colorLabelsBinding).toggleStyle(.switch).labelsHidden()
+                    }
+                    row("Shelf takes focus when shown", subtitle: "Off by default: a shelf usually appears mid-drag, and taking focus there would end the drag that summoned it.") {
+                        Toggle("", isOn: takesFocusBinding).toggleStyle(.switch).labelsHidden()
+                    }
+                    row("New shelves open as", subtitle: nil) {
+                        Picker("", selection: layoutBinding) {
+                            ForEach(ShelfLayout.allCases) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 120)
+                    }
+                    Divider()
                     row("Close shelf after dragging out", subtitle: nil) {
                         Picker("", selection: closeBehaviorBinding) {
                             ForEach(ShelfCloseBehavior.allCases) { Text($0.title).tag($0) }
@@ -168,6 +185,141 @@ struct ShelfPane: View {
                         .disabled(manager.shelves.isEmpty)
                 }
                 .padding(6)
+            }
+        }
+    }
+
+    // MARK: - Shelves
+
+    private var shelves: some View {
+        VStack(spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Create an empty shelf at the default location.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("New Shelf") { manager.newShelf(at: nil) }
+                            .controlSize(.small)
+                            .disabled(!state.shelfEnabled)
+                    }
+                    Divider()
+                    if manager.shelves.isEmpty {
+                        Text("No shelves open")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                    } else {
+                        ForEach(manager.shelves, id: \.id) { shelf in
+                            HStack(spacing: 8) {
+                                Circle().fill(shelf.model.color).frame(width: 8, height: 8)
+                                Text(shelf.model.title)
+                                    .font(.system(size: 13))
+                                Text(shelf.model.items.count == 1 ? "1 item" : "\(shelf.model.items.count) items")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                if shelf.model.isPinned {
+                                    Image(systemName: "pin.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Close") { manager.close(shelf) }
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                }
+                .padding(6)
+            } label: {
+                Text("Open Shelves")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    if manager.pinned.isEmpty {
+                        Text("No pinned shelves are closed")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+                    } else {
+                        ForEach(manager.pinned) { snapshot in
+                            HStack(spacing: 8) {
+                                Circle().fill(ShelfManager.color(named: snapshot.colorName))
+                                    .frame(width: 8, height: 8)
+                                Text(snapshot.displayName)
+                                    .font(.system(size: 13))
+                                    .lineLimit(1)
+                                Spacer()
+                                Button("Reopen") { manager.reopen(snapshot) }
+                                    .controlSize(.small)
+                                    .disabled(!state.shelfEnabled)
+                                Button { manager.forget(snapshot) } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Forget this pinned shelf")
+                            }
+                        }
+                    }
+                }
+                .padding(6)
+            } label: {
+                Text("Closed Pinned Shelves")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("A shelf you close is kept here for a while, so closing one you still needed is not final. Pinned shelves come back on their own at launch and never appear in this list.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if manager.recent.isEmpty {
+                        Text("Nothing closed recently")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+                    } else {
+                        ForEach(manager.recent) { snapshot in
+                            HStack(spacing: 8) {
+                                Circle().fill(ShelfManager.color(named: snapshot.colorName))
+                                    .frame(width: 8, height: 8)
+                                Text(snapshot.displayName)
+                                    .font(.system(size: 13))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer()
+                                Button("Reopen") { manager.reopen(snapshot) }
+                                    .controlSize(.small)
+                                    .disabled(!state.shelfEnabled)
+                                Button {
+                                    manager.forget(snapshot)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Forget this shelf and delete anything OneBar wrote for it")
+                            }
+                        }
+                        HStack {
+                            Spacer()
+                            Button("Clear List") { manager.clearRecents() }
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .padding(6)
+            } label: {
+                Text("Recently Closed")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -206,8 +358,7 @@ struct ShelfPane: View {
     private var enabledBinding: Binding<Bool> {
         Binding(get: { state.shelfEnabled }, set: {
             state.shelfEnabled = $0
-            if !$0 { ShelfManager.shared.closeAll() }
-            ShakeDetector.shared.restart()
+            ShelfManager.shared.setEnabled($0)
         })
     }
 
@@ -238,6 +389,21 @@ struct ShelfPane: View {
         Binding(get: { state.shelfCloseBehavior }, set: { state.shelfCloseBehavior = $0 })
     }
 
+    private var colorLabelsBinding: Binding<Bool> {
+        Binding(get: { state.shelfColorLabels }, set: {
+            state.shelfColorLabels = $0
+            manager.setColorLabels($0)
+        })
+    }
+
+    private var takesFocusBinding: Binding<Bool> {
+        Binding(get: { state.shelfTakesFocus }, set: { state.shelfTakesFocus = $0 })
+    }
+
+    private var layoutBinding: Binding<ShelfLayout> {
+        Binding(get: { state.shelfLayout }, set: { state.shelfLayout = $0 })
+    }
+
     private func addApp() {
         let panel = NSOpenPanel()
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
@@ -256,4 +422,3 @@ struct ShelfPane: View {
         }
     }
 }
-

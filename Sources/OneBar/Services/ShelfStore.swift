@@ -14,11 +14,49 @@ final class ShelfStore {
     /// Beside `history.json` and `click-layouts.json`, for the same reason: a
     /// stashed file is the sort of thing worth being able to find on disk.
     let itemsDirectory: URL
+    private let shelvesURL: URL
 
-    private init() {
-        itemsDirectory = ClipboardStore.shared.baseDirectory
-            .appendingPathComponent("shelf-items", isDirectory: true)
+    /// Pinned shelves come back at the next launch; recents are the short
+    /// undo list for a shelf closed by accident.
+    struct Persisted: Codable {
+        var pinned: [ShelfSnapshot] = []
+        var recent: [ShelfSnapshot] = []
+
+        init(pinned: [ShelfSnapshot] = [], recent: [ShelfSnapshot] = []) {
+            self.pinned = pinned
+            self.recent = recent
+        }
+
+        private enum CodingKeys: String, CodingKey { case pinned, recent }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            pinned = try container.decodeIfPresent([ShelfSnapshot].self, forKey: .pinned) ?? []
+            recent = try container.decodeIfPresent([ShelfSnapshot].self, forKey: .recent) ?? []
+        }
+    }
+
+    private convenience init() {
+        self.init(baseDirectory: ClipboardStore.shared.baseDirectory)
+    }
+
+    /// Internal for isolated persistence tests; production uses `shared`.
+    init(baseDirectory base: URL) {
+        itemsDirectory = base.appendingPathComponent("shelf-items", isDirectory: true)
+        shelvesURL = base.appendingPathComponent("shelves.json")
         try? FileManager.default.createDirectory(at: itemsDirectory, withIntermediateDirectories: true)
+    }
+
+    func loadPersisted() -> Persisted {
+        guard let data = try? Data(contentsOf: shelvesURL),
+              let decoded = try? JSONDecoder().decode(Persisted.self, from: data)
+        else { return Persisted() }
+        return decoded
+    }
+
+    func savePersisted(_ persisted: Persisted) {
+        guard let data = try? JSONEncoder().encode(persisted) else { return }
+        try? data.write(to: shelvesURL, options: .atomic)
     }
 
     /// Writes `data` into a uniquely-named subfolder so the file keeps the name
@@ -45,29 +83,50 @@ final class ShelfStore {
         return folder
     }
 
+    /// Removes an abandoned promise delivery directory. It is deliberately
+    /// restricted to a direct child of `shelf-items`.
+    func discardPromiseDestination(_ url: URL) {
+        guard isDirectChildOfItemsDirectory(url) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     /// Deletes only what we wrote. A referenced file is the user's, and removing
     /// an item from a shelf must never touch it.
-    func discard(_ items: [ShelfItem]) {
+    func discard(_ items: [ShelfItem], keeping retainedItems: [ShelfItem] = []) {
+        let retainedPaths = Set(retainedItems.compactMap { item -> String? in
+            guard item.isMaterialised, let path = item.path else { return nil }
+            return URL(fileURLWithPath: path).standardizedFileURL.path
+        })
         for item in items where item.isMaterialised {
             guard let path = item.path else { continue }
             let url = URL(fileURLWithPath: path)
-            // The per-item folder, not just the file, or the wrappers pile up.
+            // A recovered snapshot can contain the exact materialisation that
+            // is already represented in the destination shelf. Rejecting that
+            // duplicate must not delete the file underneath the retained item.
+            guard !retainedPaths.contains(url.standardizedFileURL.path) else { continue }
             let folder = url.deletingLastPathComponent()
-            if folder.deletingLastPathComponent().standardizedFileURL == itemsDirectory.standardizedFileURL {
+            // Never trust the persisted flag alone: deletion is only allowed
+            // inside OneBar's own shelf-items directory.
+            if isDirectChildOfItemsDirectory(folder) {
                 try? FileManager.default.removeItem(at: folder)
-            } else {
+            } else if isDirectChildOfItemsDirectory(url) {
                 try? FileManager.default.removeItem(at: url)
             }
         }
     }
 
-    /// Shelves do not survive a quit, so everything left here at launch belongs
-    /// to a shelf that no longer exists.
-    func sweep() {
+    /// Deletes every materialised file not belonging to a shelf that survived.
+    /// Run at launch, where anything unaccounted for is the residue of a shelf
+    /// that was open when the app last quit.
+    func sweep(keeping snapshots: [ShelfSnapshot]) {
+        let kept = Set(snapshots.flatMap(\.items).compactMap { item -> String? in
+            guard item.isMaterialised, let path = item.path else { return nil }
+            return URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
+        })
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: itemsDirectory, includingPropertiesForKeys: nil
         ) else { return }
-        for url in contents {
+        for url in contents where !kept.contains(url.lastPathComponent) {
             try? FileManager.default.removeItem(at: url)
         }
     }
@@ -99,5 +158,8 @@ final class ShelfStore {
             .replacingOccurrences(of: ":", with: "-")
         return cleaned.isEmpty ? "Untitled" : String(cleaned.prefix(200))
     }
-}
 
+    private func isDirectChildOfItemsDirectory(_ url: URL) -> Bool {
+        url.deletingLastPathComponent().standardizedFileURL == itemsDirectory.standardizedFileURL
+    }
+}

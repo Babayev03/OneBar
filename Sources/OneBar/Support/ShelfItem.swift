@@ -109,8 +109,123 @@ struct ShelfItem: Identifiable, Codable, Equatable, Sendable {
             return linkURL?.host
         }
     }
+
+    func hasSameShelfIdentity(as other: ShelfItem) -> Bool {
+        switch kind {
+        case .file, .image:
+            guard other.kind == .file || other.kind == .image else { return false }
+            return path != nil && path == other.path
+        case .link:
+            return other.kind == .link && linkString != nil && linkString == other.linkString
+        case .text:
+            return other.kind == .text && text == other.text
+        }
+    }
 }
 
+
+/// How a shelf lays its items out.
+enum ShelfLayout: String, Codable, CaseIterable, Identifiable {
+    case grid
+    case list
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .grid: return "Icons"
+        case .list: return "List"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .grid: return "square.grid.2x2"
+        case .list: return "list.bullet"
+        }
+    }
+}
+
+/// Whether the shelf colour came from OneBar's automatic palette or was
+/// explicitly chosen by the user. This lets the global colour-label setting
+/// change automatic labels without overwriting a user's customization.
+enum ShelfColorSource: String, Codable, CaseIterable {
+    case automatic
+    case user
+}
+
+/// A shelf reduced to what survives being closed.
+///
+/// Pinned shelves come back at the next launch; unpinned ones go on a short
+/// recents list so a shelf closed by accident is not a shelf lost.
+struct ShelfSnapshot: Codable, Identifiable, Equatable {
+    var id: UUID
+    var name: String?
+    var colorName: String?
+    var colorSource: ShelfColorSource
+    var items: [ShelfItem]
+    var originX: Double?
+    var originY: Double?
+    var isPinned: Bool
+    var layout: ShelfLayout
+    var keepInSpace: Bool
+    var closedAt: Date?
+
+    init(
+        id: UUID,
+        name: String? = nil,
+        colorName: String? = nil,
+        colorSource: ShelfColorSource = .automatic,
+        items: [ShelfItem] = [],
+        originX: Double? = nil,
+        originY: Double? = nil,
+        isPinned: Bool = false,
+        layout: ShelfLayout = .grid,
+        keepInSpace: Bool = false,
+        closedAt: Date? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.colorName = colorName
+        self.colorSource = colorSource
+        self.items = items
+        self.originX = originX
+        self.originY = originY
+        self.isPinned = isPinned
+        self.layout = layout
+        self.keepInSpace = keepInSpace
+        self.closedAt = closedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, colorName, colorSource, items, originX, originY
+        case isPinned, layout, keepInSpace, closedAt
+    }
+
+    /// Shelf persistence is intentionally additive. A file written by an
+    /// earlier phase must keep loading when a later phase adds a field.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        colorName = try container.decodeIfPresent(String.self, forKey: .colorName)
+        colorSource = try container.decodeIfPresent(ShelfColorSource.self, forKey: .colorSource) ?? .automatic
+        items = try container.decodeIfPresent([ShelfItem].self, forKey: .items) ?? []
+        originX = try container.decodeIfPresent(Double.self, forKey: .originX)
+        originY = try container.decodeIfPresent(Double.self, forKey: .originY)
+        isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        layout = try container.decodeIfPresent(ShelfLayout.self, forKey: .layout) ?? .grid
+        keepInSpace = try container.decodeIfPresent(Bool.self, forKey: .keepInSpace) ?? false
+        closedAt = try container.decodeIfPresent(Date.self, forKey: .closedAt)
+    }
+
+    /// What the overflow list and Preferences show for a shelf with no name.
+    var displayName: String {
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+        if items.count == 1 { return items[0].title }
+        return items.isEmpty ? "Empty shelf" : "\(items.count) items"
+    }
+}
 /// How hard the cursor has to be shaken before a shelf appears. The numbers are
 /// a reversal count and the minimum travel each leg of the shake must cover —
 /// a leg threshold is what separates a shake from hand tremor, which a plain
@@ -190,4 +305,3 @@ enum ShelfCloseBehavior: String, Codable, CaseIterable, Identifiable {
         }
     }
 }
-
