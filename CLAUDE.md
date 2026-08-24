@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OneBar is a macOS menubar utility (SwiftPM executable, Swift 6 toolchain in Swift 5 language mode, macOS 26+). It bundles clipboard history with on-device OCR/QR, system stat rings, system-wide keyboard cleaning, prevent-sleep, and screen-region text/QR scanning. No third-party dependencies, no network calls — everything is AppKit/SwiftUI/Vision/IOKit/Carbon.
 
-There is no test target and no linter config.
+There is no linter config. There is a test target (`Tests/OneBarTests/`, `swift test`) covering the
+shelf's pure logic — file ownership, transfers, window geometry, action availability. It is not a
+general test suite: everything else in the app is AppKit-bound and is verified by hand.
 
 ## Commands
 

@@ -92,6 +92,10 @@ struct ShelfItem: Identifiable, Codable, Equatable, Sendable {
         return URL(string: linkString)
     }
 
+    /// What opening the item acts on: the file if there is one, else the link.
+    /// A link never has a file, and a file is never opened as a URL string.
+    var activationURL: URL? { resolveURL() ?? linkURL }
+
     var sizeString: String? {
         guard let byteSize else { return nil }
         return ByteCountFormatter.string(fromByteCount: Int64(byteSize), countStyle: .file)

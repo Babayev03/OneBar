@@ -148,10 +148,7 @@ struct ShelfItemCell: View {
     }
 
     private func open() {
-        if let url = item.resolveURL() {
-            NSWorkspace.shared.open(url)
-        } else if let url = item.linkURL {
-            NSWorkspace.shared.open(url)
-        }
+        guard let url = item.activationURL else { return }
+        NSWorkspace.shared.open(url)
     }
 }

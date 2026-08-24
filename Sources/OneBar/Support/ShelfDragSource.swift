@@ -18,6 +18,9 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
 
     private var mouseDownPoint: NSPoint?
     private var beganDrag = false
+    /// `NSMenuItem.target` is weak, so the menu's target has to be owned by
+    /// something that outlives the menu.
+    private var menuResponder: ShelfMenuResponder?
 
     /// The panel is movable by its background, and AppKit decides that from the
     /// view under the pointer before the view's own tracking runs — so without
@@ -53,6 +56,20 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
         if !beganDrag { onClickRelease?(event) }
         mouseDownPoint = nil
         beganDrag = false
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let controller, let itemID else { return nil }
+        // Finder's rule: a right-click outside the current selection acts on the
+        // item under the pointer alone. Without it the menu would silently
+        // apply to whatever happened to be selected somewhere else.
+        if !controller.model.selection.contains(itemID) {
+            controller.model.selection = [itemID]
+            controller.model.selectionAnchor = itemID
+        }
+        let responder = ShelfMenuResponder(controller: controller, anchor: self)
+        menuResponder = responder
+        return ShelfActionMenu.menu(scope: .selection, controller: controller, target: responder)
     }
 
     private func beginDrag(with event: NSEvent) {

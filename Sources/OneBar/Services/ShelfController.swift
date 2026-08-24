@@ -271,6 +271,14 @@ final class ShelfController {
         if matches(.shelfCopy) { copySelection(); return true }
         if matches(.shelfPaste) { addFromClipboard(); return true }
         if matches(.shelfQuickLook) { quickLook(); return true }
+        if matches(.shelfOpen) {
+            ShelfActionRunner.perform(.open, scope: .selection, in: self)
+            return true
+        }
+        if matches(.shelfShowInFinder) {
+            ShelfActionRunner.perform(.showInFinder, scope: .selection, in: self)
+            return true
+        }
         return false
     }
 
@@ -298,11 +306,14 @@ final class ShelfController {
         return true
     }
 
-    private var actionItems: [ShelfItem] {
+    var actionItems: [ShelfItem] {
         model.selection.isEmpty
             ? model.items
             : model.items.filter { model.selection.contains($0.id) }
     }
+
+    /// Something on screen for a popover-style sheet to hang off.
+    var anchorView: NSView? { dropView }
 
     func copySelection() {
         let items = actionItems
@@ -497,6 +508,21 @@ final class ShelfController {
 
     func clear() {
         remove(Set(model.items.map(\.id)))
+    }
+
+    /// Points an item at the file it just became. The bookmark is rewritten too:
+    /// the old one still resolves through the rename, but only until the file
+    /// moves again, and a stale bookmark is the thing it exists to avoid.
+    func relocate(_ id: UUID, to url: URL) {
+        guard let index = model.items.firstIndex(where: { $0.id == id }) else { return }
+        var item = model.items[index]
+        item.path = url.path
+        item.bookmark = try? url.bookmarkData()
+        item.title = url.lastPathComponent
+        item.byteSize = ShelfStore.shared.fileSize(of: url)
+        ShelfThumbnails.shared.forget([item])
+        model.items[index] = item
+        persistIfPinned()
     }
 
     func close() {

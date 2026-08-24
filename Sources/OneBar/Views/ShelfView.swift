@@ -108,6 +108,12 @@ struct ShelfView: View {
 
     private var overflowMenu: some View {
         Menu {
+            Menu("Item Actions") {
+                ShelfActionMenuItems(controller: controller, scope: .selection)
+            }
+            .disabled(model.items.isEmpty)
+
+            Divider()
             Button("Customize…") { controller.showCustomize() }
 
             Picker("Layout", selection: layoutBinding) {
@@ -212,6 +218,17 @@ struct ShelfView: View {
         }
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contextMenu { shelfMenuItems }
+    }
+
+    /// Raised on empty shelf space, where there is no item under the pointer.
+    /// Scoped to the shelf rather than the selection so nothing destructive can
+    /// run against every item at once from a click on the background.
+    @ViewBuilder
+    private var shelfMenuItems: some View {
+        ShelfActionMenuItems(controller: controller, scope: .shelf)
+        Divider()
+        Button("New Shelf") { manager.newShelf(at: nil) }
     }
 
     @ViewBuilder
@@ -237,6 +254,7 @@ struct ShelfView: View {
             }
         }
         .scrollIndicators(.never)
+        .contextMenu { shelfMenuItems }
     }
 
     private var footer: some View {
