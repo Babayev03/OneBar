@@ -47,12 +47,12 @@ final class ShelfManager {
         if AppState.shared.shelfEnabled { reopenAllPinned() }
         persist()
 
-        ShakeDetector.shared.restart()
+        ShelfDragObserver.shared.restart()
     }
 
     func stop() {
         persist()
-        ShakeDetector.shared.stop()
+        ShelfDragObserver.shared.stop()
         let transient = shelves
             .filter { !$0.model.isPinned }
             .flatMap { $0.model.items }
@@ -124,7 +124,7 @@ final class ShelfManager {
         } else {
             closeAll()
         }
-        ShakeDetector.shared.restart()
+        ShelfDragObserver.shared.restart()
         persist()
     }
 
@@ -135,6 +135,7 @@ final class ShelfManager {
         let snapshot = controller.snapshot()
         shelves.remove(at: index)
         controller.tearDown()
+        restackCollapsedShelves(animated: true)
         let evicted = ShelfArchiveLogic.recordClosed(
             snapshot,
             pinned: &pinned,
@@ -172,6 +173,97 @@ final class ShelfManager {
     }
 
     var mostRecentlyClosed: ShelfSnapshot? { recent.first }
+
+    // MARK: - Collapsed shelf stacks
+
+    /// Vertically separated edge shelves remain independent. If the edge has
+    /// filled and two collapsed shelves occupy the same row, they become a
+    /// horizontal card stack: the newest stays at the edge and older cards are
+    /// shifted inward far enough to expose their titles.
+    func restackCollapsedShelves(animated: Bool) {
+        var clusters: [[ShelfController]] = []
+        for controller in shelves where controller.collapseStackData != nil {
+            let matching = clusters.indices.filter { index in
+                clusters[index].contains { sameStackRow($0, controller) }
+            }
+            guard let first = matching.first else {
+                clusters.append([controller])
+                continue
+            }
+            clusters[first].append(controller)
+            for index in matching.dropFirst().reversed() {
+                clusters[first].append(contentsOf: clusters.remove(at: index))
+            }
+        }
+
+        for cluster in clusters {
+            // `shelves` is creation order, so reversing it puts the newest card
+            // at depth zero, directly against the display edge.
+            for (depth, controller) in cluster.reversed().enumerated() {
+                controller.applyCollapseStackDepth(depth, animated: animated)
+            }
+        }
+    }
+
+    private func sameStackRow(_ first: ShelfController, _ second: ShelfController) -> Bool {
+        guard let a = first.collapseStackData,
+              let b = second.collapseStackData,
+              a.edge == b.edge,
+              a.visible == b.visible
+        else { return false }
+        return max(a.frame.minY, b.frame.minY) < min(a.frame.maxY, b.frame.maxY)
+    }
+
+    // MARK: - Internal transfers
+
+    /// Moves or copies items between two live shelves without round-tripping
+    /// through file URLs, which would lose OneBar's materialization ownership.
+    @discardableResult
+    func transfer(
+        _ items: [ShelfItem],
+        from source: ShelfController,
+        to destination: ShelfController,
+        operation: ShelfTransferOperation
+    ) -> Bool {
+        guard AppState.shared.shelfEnabled,
+              source !== destination,
+              source.isActive,
+              destination.isActive,
+              !items.isEmpty
+        else { return false }
+
+        switch operation {
+        case .move:
+            let accepted = destination.add(items, discardRejected: false)
+            guard !accepted.isEmpty else { return false }
+            source.registerInternalTransfer(
+                operation: operation,
+                itemIDs: Set(accepted.map(\.id))
+            )
+            return true
+
+        case .copy:
+            let candidates = items.compactMap { item -> (sourceID: UUID, copy: ShelfItem)? in
+                guard destination.canAccept([item]),
+                      let copy = ShelfStore.shared.copyForShelf(item)
+                else { return nil }
+                return (item.id, copy)
+            }
+            guard !candidates.isEmpty else { return false }
+
+            let accepted = destination.add(candidates.map(\.copy))
+            let acceptedCopyIDs = Set(accepted.map(\.id))
+            let copiedSourceIDs = Set(candidates.compactMap {
+                acceptedCopyIDs.contains($0.copy.id) ? $0.sourceID : nil
+            })
+            guard !copiedSourceIDs.isEmpty else { return false }
+            source.registerInternalTransfer(
+                operation: operation,
+                itemIDs: copiedSourceIDs
+            )
+            return true
+        }
+    }
 
     // MARK: - Appearance
 

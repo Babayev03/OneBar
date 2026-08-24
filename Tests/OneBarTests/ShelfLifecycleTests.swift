@@ -134,6 +134,37 @@ struct ShelfLifecycleTests {
         )
         #expect(selection == Set(ids))
         #expect(anchor == ids[0])
+
+        selection = [ids[0]]
+        anchor = ids[0]
+        ShelfSelectionLogic.move(
+            direction: .right,
+            orderedIDs: ids,
+            columnCount: 2,
+            extending: false,
+            selection: &selection,
+            anchor: &anchor
+        )
+        #expect(selection == [ids[1]])
+        ShelfSelectionLogic.move(
+            direction: .down,
+            orderedIDs: ids,
+            columnCount: 2,
+            extending: false,
+            selection: &selection,
+            anchor: &anchor
+        )
+        #expect(selection == [ids[3]])
+        ShelfSelectionLogic.move(
+            direction: .up,
+            orderedIDs: ids,
+            columnCount: 2,
+            extending: true,
+            selection: &selection,
+            anchor: &anchor
+        )
+        #expect(selection == Set(ids[1...3]))
+        #expect(anchor == ids[3])
     }
 
     @Test("Selection modifiers suppress double-click opening")

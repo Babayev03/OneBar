@@ -25,6 +25,11 @@ final class ShelfModel {
     var layout: ShelfLayout = .grid
     var keepInSpace = false
 
+    var collapse: ShelfCollapse?
+    var collapseEdge: ShelfEdge?
+    var isPeeking = false
+    var hasAutoRetracted = false
+
     var totalSize: Int { items.compactMap(\.byteSize).reduce(0, +) }
 
     var selectedSize: Int {
@@ -56,12 +61,33 @@ final class ShelfController {
     private static let maximumHeight: CGFloat = 440
 
     private var panel: NSPanel?
+    private weak var dropView: ShelfDropView?
     private var keyMonitor: Any?
+    private var clickMonitor: Any?
+    private var moveMouseUpMonitor: Any?
     private var moveObserver: NSObjectProtocol?
+    private var screenObservers: [NSObjectProtocol] = []
     private var positionPersistTask: Task<Void, Never>?
     private var previewObserver: NSObjectProtocol?
+    private var previewIndexObservation: NSKeyValueObservation?
     private var previouslyFocusedApplication: NSRunningApplication?
+    private var shelfWasKeyBeforePreview = false
+    private var hoverMonitors: [Any] = []
+    private var collapseVisibleFrame: NSRect?
+    private var collapseStackDepth = 0
+    private var peekTask: Task<Void, Never>?
+    private var expansionTask: Task<Void, Never>?
+    private var frameAnimationTask: Task<Void, Never>?
+    private var autoRetractTask: Task<Void, Never>?
+    private var dockHandleLabelPanel: NSPanel?
     private var draggedOut: [ShelfItem] = []
+    private var internalTransfer: (operation: ShelfTransferOperation, itemIDs: Set<UUID>)?
+    private var userMoveCandidate = false
+    private var isUserMoving = false
+    private var snapSuppressedForMove = false
+    private var needsScreenReclamp = false
+
+    private static let dockAnimationDuration = 0.22
 
     convenience init(at point: NSPoint?) {
         self.init(snapshot: nil, at: point)
@@ -83,6 +109,7 @@ final class ShelfController {
             model.keepInSpace = snapshot.keepInSpace
         } else {
             model.layout = AppState.shared.shelfLayout
+            model.keepInSpace = AppState.shared.shelfKeepInSpace
         }
 
         let panel = ShelfPanel(
@@ -98,7 +125,10 @@ final class ShelfController {
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.collectionBehavior = ShelfWindowGeometry.collectionBehavior(
+            keepInCurrentSpace: model.keepInSpace
+        )
+        panel.acceptsMouseMovedEvents = true
 
         let drop = ShelfDropView(frame: panel.contentLayoutRect)
         drop.controller = self
@@ -111,6 +141,7 @@ final class ShelfController {
 
         panel.contentView = drop
         self.panel = panel
+        self.dropView = drop
 
         panel.setContentSize(NSSize(width: Self.width, height: desiredHeight()))
         if let snapshot, let x = snapshot.originX, let y = snapshot.originY {
@@ -134,10 +165,63 @@ final class ShelfController {
             model.isPresented = true
         }
         installKeyMonitor()
+        installClickMonitor()
         observePosition(of: panel)
+        observeScreenChanges(of: panel)
+        applyCollectionBehavior()
     }
 
     // MARK: - Keyboard
+
+    /// Observes shelf clicks without claiming the header from AppKit's window
+    /// dragging. A click on a collapsed tab is consumed so it cannot expand the
+    /// shelf and also activate a control that moved underneath the pointer.
+    private func installClickMonitor() {
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) {
+            [weak self] event in
+            guard let self else { return event }
+
+            if event.type == .leftMouseUp {
+                if self.userMoveCandidate || self.isUserMoving {
+                    self.finishUserMove(modifiers: event.modifierFlags)
+                }
+                return event
+            }
+
+            guard let panel = self.panel, event.window === panel else { return event }
+            // A real grab always wins over a peek, retract, dock, or snap
+            // animation. Cancelling here prevents an old target from pulling
+            // the shelf away after AppKit starts the user's window drag.
+            self.cancelFrameAnimation()
+            let headerBottom = panel.contentLayoutRect.height - Self.headerHeight
+            if self.model.collapse != nil {
+                if self.model.isPeeking {
+                    // During a moving-window animation AppKit can report this
+                    // event against the destination frame rather than the
+                    // currently drawn frame, so a header-coordinate check is
+                    // unreliable. Any click on a revealed shelf commits it;
+                    // a header click then continues into the ordinary window
+                    // drag, while an item click remains an item click.
+                    self.commitPeekForInteraction()
+                } else {
+                    self.cancelUserMoveTracking()
+                    self.expand()
+                    return nil
+                }
+            }
+
+            if event.clickCount == 2, event.locationInWindow.y >= headerBottom {
+                self.cancelUserMoveTracking()
+                self.performDoubleClickAction()
+                return nil
+            }
+
+            self.userMoveCandidate = true
+            self.isUserMoving = false
+            self.snapSuppressedForMove = event.modifierFlags.contains(.command)
+            return event
+        }
+    }
 
     /// Every shelf installs one, and each guards on being the key window, so
     /// only the shelf you last clicked responds. A borderless non-activating
@@ -151,11 +235,15 @@ final class ShelfController {
 
     private func handle(_ event: NSEvent) -> Bool {
         if event.keyCode == 53 {
-            if model.route == .customize { showItems() } else { close() }
+            if model.route == .customize { showItems() }
+            else if model.collapse != nil { expand() }
+            else { close() }
             return true
         }
         // The field editor must keep ordinary typing and its own edit commands.
         if panel?.firstResponder is NSTextView { return false }
+
+        if handleSelectionArrow(event) { return true }
 
         let store = ShortcutStore.shared
         func matches(_ action: ShortcutAction) -> Bool {
@@ -165,6 +253,9 @@ final class ShelfController {
         if matches(.shelfCloseAll) { ShelfManager.shared.closeAll(); return true }
         if matches(.shelfClose) { close(); return true }
         if matches(.shelfCustomize) { showCustomize(); return true }
+        if matches(.shelfDockLeft) { dock(to: .left); return true }
+        if matches(.shelfDockRight) { dock(to: .right); return true }
+        if matches(.shelfDock) { toggleDock(); return true }
         if matches(.shelfNewFromClipboard) { ShelfManager.shared.newShelfFromClipboard(); return true }
         if matches(.shelfSelectAll) {
             model.selection = Set(model.items.map(\.id))
@@ -184,6 +275,28 @@ final class ShelfController {
     }
 
     // MARK: - Clipboard and Quick Look
+
+    private func handleSelectionArrow(_ event: NSEvent) -> Bool {
+        let disallowed = event.modifierFlags.intersection([.command, .option, .control])
+        guard disallowed.isEmpty else { return false }
+        let direction: ShelfSelectionLogic.Direction
+        switch event.keyCode {
+        case 123: direction = .left
+        case 124: direction = .right
+        case 125: direction = .down
+        case 126: direction = .up
+        default: return false
+        }
+        ShelfSelectionLogic.move(
+            direction: direction,
+            orderedIDs: model.items.map(\.id),
+            columnCount: model.layout == .grid ? Self.columns : 1,
+            extending: event.modifierFlags.contains(.shift),
+            selection: &model.selection,
+            anchor: &model.selectionAnchor
+        )
+        return true
+    }
 
     private var actionItems: [ShelfItem] {
         model.selection.isEmpty
@@ -225,11 +338,31 @@ final class ShelfController {
         }
 
         previouslyFocusedApplication = NSWorkspace.shared.frontmostApplication
+        shelfWasKeyBeforePreview = panel.isKeyWindow
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        guard let preview = QLPreviewPanel.shared() else {
+        guard let preview = QLPreviewPanel.shared(), let dropView else {
             restorePreviousApplication()
             return
+        }
+        // Do not rely on the responder-chain hand-off alone. A click in the
+        // AppKit drag surface can leave Quick Look with its previous empty data
+        // source, which displays “No Items Selected” even though the shelf has
+        // a valid selection. Install the current shelf explicitly and reload it
+        // before presenting the shared panel.
+        preview.dataSource = dropView
+        preview.delegate = dropView
+        preview.reloadData()
+        preview.currentPreviewItemIndex = previewSelectionIndex
+        previewIndexObservation?.invalidate()
+        previewIndexObservation = preview.observe(
+            \.currentPreviewItemIndex,
+            options: [.new]
+        ) { [weak self] preview, _ in
+            let index = preview.currentPreviewItemIndex
+            Task { @MainActor [weak self] in
+                self?.selectPreviewItem(at: index)
+            }
         }
         previewObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification,
@@ -247,7 +380,25 @@ final class ShelfController {
         preview.makeKeyAndOrderFront(nil)
     }
 
-    var previewURLs: [URL] { actionItems.compactMap { $0.resolveURL() } }
+    private var previewItems: [ShelfItem] {
+        let previewable = model.items.filter { $0.resolveURL() != nil }
+        guard previewable.contains(where: { model.selection.contains($0.id) }) else { return [] }
+        return previewable
+    }
+
+    var previewURLs: [URL] { previewItems.compactMap { $0.resolveURL() } }
+
+    var previewSelectionIndex: Int {
+        max(0, previewItems.firstIndex(where: { model.selection.contains($0.id) }) ?? 0)
+    }
+
+    private func selectPreviewItem(at index: Int) {
+        let items = previewItems
+        guard items.indices.contains(index) else { return }
+        let itemID = items[index].id
+        model.selection = [itemID]
+        model.selectionAnchor = itemID
+    }
 
     /// Quick Look calls this when the shelf gives up preview-panel control.
     /// It is the reliable close path; the window observer above remains a
@@ -259,6 +410,8 @@ final class ShelfController {
     private func stopPreviewObservation(restoreFocus: Bool) {
         if let previewObserver { NotificationCenter.default.removeObserver(previewObserver) }
         previewObserver = nil
+        previewIndexObservation?.invalidate()
+        previewIndexObservation = nil
         if restoreFocus { restorePreviousApplication() }
         else { previouslyFocusedApplication = nil }
     }
@@ -266,41 +419,66 @@ final class ShelfController {
     private func restorePreviousApplication() {
         let application = previouslyFocusedApplication
         previouslyFocusedApplication = nil
-        guard let application, application != NSRunningApplication.current else { return }
-        application.activate(options: [])
+        let shouldRestoreShelfKey = shelfWasKeyBeforePreview
+        shelfWasKeyBeforePreview = false
+        if let application, application != NSRunningApplication.current {
+            application.activate(options: [])
+        }
+        guard shouldRestoreShelfKey else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let self, self.isActive, let panel = self.panel, panel.isVisible else { return }
+            // The shelf is a non-activating panel, so it can receive the next
+            // Space/arrow key while the user's original application remains
+            // frontmost, exactly as it did before Quick Look opened.
+            panel.makeKey()
+        }
     }
 
     // MARK: - Contents
 
     @discardableResult
-    func add(_ incoming: [ShelfItem]) -> Bool {
+    func add(_ incoming: [ShelfItem], discardRejected: Bool = true) -> [ShelfItem] {
         guard isActive, !incoming.isEmpty else {
-            ShelfStore.shared.discard(incoming)
-            return false
+            if discardRejected { ShelfStore.shared.discard(incoming) }
+            return []
         }
-        var added = false
-        var rejected: [ShelfItem] = []
-        for item in incoming {
-            if contains(item) {
-                rejected.append(item)
-            } else {
-                model.items.append(item)
-                added = true
-            }
+        let wasEmpty = model.items.isEmpty
+        let resolution = ShelfTransferLogic.resolve(incoming: incoming, existing: model.items)
+        let accepted = resolution.accepted
+        let rejected = resolution.rejected
+        model.items.append(contentsOf: accepted)
+        if discardRejected {
+            ShelfStore.shared.discard(rejected, keeping: model.items)
         }
-        ShelfStore.shared.discard(rejected, keeping: model.items)
-        guard added else {
+        guard !accepted.isEmpty else {
             HUD.show("Already on the shelf", symbol: "tray.full")
-            return false
+            return []
         }
         model.route = .items
         resize()
         persistIfPinned()
-        return true
+
+        if AppState.shared.shelfAutoRetract,
+           wasEmpty,
+           !model.hasAutoRetracted,
+           model.collapse == nil {
+            model.hasAutoRetracted = true
+            autoRetractTask?.cancel()
+            autoRetractTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(350))
+                guard let self, self.isActive, self.model.collapse == nil else { return }
+                self.retract()
+            }
+        }
+        return accepted
     }
 
-    private func contains(_ item: ShelfItem) -> Bool {
-        model.items.contains { item.hasSameShelfIdentity(as: $0) }
+    func canAccept(_ incoming: [ShelfItem]) -> Bool {
+        isActive && !ShelfTransferLogic.resolve(
+            incoming: incoming,
+            existing: model.items
+        ).accepted.isEmpty
     }
 
     func remove(_ ids: Set<UUID>, deletingFiles: Bool = true) {
@@ -329,33 +507,59 @@ final class ShelfController {
     /// whether the items are kept, so nothing is deleted here.
     func tearDown() {
         isActive = false
+        autoRetractTask?.cancel()
+        autoRetractTask = nil
+        peekTask?.cancel()
+        peekTask = nil
+        expansionTask?.cancel()
+        expansionTask = nil
+        cancelFrameAnimation()
+        hideDockHandleLabel(animated: false)
         positionPersistTask?.cancel()
         positionPersistTask = nil
+        cancelUserMoveTracking()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
+        stopHoverWatch()
         if let moveObserver { NotificationCenter.default.removeObserver(moveObserver) }
         moveObserver = nil
+        for observer in screenObservers { NotificationCenter.default.removeObserver(observer) }
+        screenObservers.removeAll()
         stopPreviewObservation(restoreFocus: false)
         ShelfThumbnails.shared.forget(model.items)
         panel?.orderOut(nil)
         panel?.contentView = nil
+        dropView = nil
         panel = nil
     }
 
     func snapshot() -> ShelfSnapshot {
-        ShelfSnapshot(
+        let persistedFrame = frameForPersistence
+        return ShelfSnapshot(
             id: id,
             name: model.name,
             colorName: model.colorName,
             colorSource: model.colorSource,
             items: model.items,
-            originX: panel.map { Double($0.frame.origin.x) },
-            originY: panel.map { Double($0.frame.origin.y) },
+            originX: persistedFrame.map { Double($0.origin.x) },
+            originY: persistedFrame.map { Double($0.origin.y) },
             isPinned: model.isPinned,
             layout: model.layout,
             keepInSpace: model.keepInSpace,
             closedAt: nil
         )
+    }
+
+    private var frameForPersistence: NSRect? {
+        guard let panel else { return nil }
+        guard let edge = model.collapseEdge,
+              let visible = collapseDisplayFrame(fallback: panel.frame)
+        else {
+            return panel.frame
+        }
+        return ShelfWindowGeometry.rested(panel.frame, edge: edge, in: visible)
     }
 
     func togglePin() {
@@ -390,6 +594,7 @@ final class ShelfController {
 
     func setKeepInSpace(_ keepInSpace: Bool) {
         model.keepInSpace = keepInSpace
+        applyCollectionBehavior()
         persistIfPinned()
     }
 
@@ -428,7 +633,21 @@ final class ShelfController {
             object: panel,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.schedulePositionPersistence() }
+            MainActor.assumeIsolated { self?.windowDidMove() }
+        }
+    }
+
+    private func windowDidMove() {
+        schedulePositionPersistence()
+
+        guard userMoveCandidate, NSEvent.pressedMouseButtons & 1 == 1 else { return }
+        snapSuppressedForMove = snapSuppressedForMove || NSEvent.modifierFlags.contains(.command)
+        guard !isUserMoving else { return }
+        isUserMoving = true
+
+        moveMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) {
+            [weak self] event in
+            Task { @MainActor in self?.finishUserMove(modifiers: event.modifierFlags) }
         }
     }
 
@@ -439,6 +658,60 @@ final class ShelfController {
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
             self?.persistIfPinned()
+        }
+    }
+
+    private func finishUserMove(modifiers: NSEvent.ModifierFlags) {
+        let shouldSnap = ShelfWindowGeometry.shouldSnap(
+            isRealUserMove: isUserMoving,
+            enabled: AppState.shared.shelfSnap,
+            isCollapsed: model.collapse != nil,
+            commandSuppressed: snapSuppressedForMove || modifiers.contains(.command)
+        )
+        let shouldReclamp = needsScreenReclamp
+        needsScreenReclamp = false
+        cancelUserMoveTracking()
+        if shouldSnap { snapIntoPlace() }
+        else if shouldReclamp { reclampForScreens() }
+    }
+
+    private func cancelUserMoveTracking() {
+        if let moveMouseUpMonitor { NSEvent.removeMonitor(moveMouseUpMonitor) }
+        moveMouseUpMonitor = nil
+        userMoveCandidate = false
+        isUserMoving = false
+        snapSuppressedForMove = false
+    }
+
+    private func observeScreenChanges(of panel: NSPanel) {
+        screenObservers.append(NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleScreenChange() }
+        })
+        screenObservers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeScreenNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self,
+                      !self.isUserMoving,
+                      !self.userMoveCandidate,
+                      NSEvent.pressedMouseButtons & 1 == 0
+                else { return }
+                self.reclampForScreens()
+            }
+        })
+    }
+
+    private func handleScreenChange() {
+        if isUserMoving || userMoveCandidate || NSEvent.pressedMouseButtons & 1 == 1 {
+            needsScreenReclamp = true
+        } else {
+            reclampForScreens()
         }
     }
 
@@ -479,31 +752,467 @@ final class ShelfController {
     }
 
     func willBeginDragOut(_ items: [ShelfItem]) {
+        cancelUserMoveTracking()
         draggedOut = items
+        internalTransfer = nil
         ShelfManager.shared.isDraggingOut = true
     }
 
+    func registerInternalTransfer(
+        operation: ShelfTransferOperation,
+        itemIDs: Set<UUID>
+    ) {
+        internalTransfer = (operation, itemIDs)
+    }
+
     func didEndDragOut(operation: NSDragOperation) {
+        cancelUserMoveTracking()
         ShelfManager.shared.isDraggingOut = false
         let items = draggedOut
         draggedOut = []
+        let completedTransfer = internalTransfer
+        internalTransfer = nil
         guard !items.isEmpty else { return }
 
-        let moved = operation.contains(.move)
-        let dropped = !operation.isEmpty
+        let moved = completedTransfer.map { $0.operation == .move }
+            ?? operation.contains(.move)
+        let dropped = completedTransfer != nil || !operation.isEmpty
 
         if moved {
             // The destination has taken the file; our path now points at
             // nothing. Deleting on top of that would only fail, and would be
             // wrong if it somehow succeeded.
-            remove(Set(items.map(\.id)), deletingFiles: false)
+            remove(completedTransfer?.itemIDs ?? Set(items.map(\.id)), deletingFiles: false)
         }
+
+        guard ShelfTransferLogic.shouldApplyCloseBehavior(
+            afterInternalTransfer: completedTransfer != nil,
+            remainingItemCount: model.items.count
+        ) else { return }
 
         switch AppState.shared.shelfCloseBehavior {
         case .always: if dropped { close() }
         case .whenMoved: if moved { close() }
         case .never: break
         }
+    }
+
+    // MARK: - Docking, retracting and peeking
+
+    func dock(to edge: ShelfEdge? = nil) { collapse(.docked, to: edge) }
+    func retract(to edge: ShelfEdge? = nil) { collapse(.retracted, to: edge) }
+
+    func toggleDock(_ edge: ShelfEdge? = nil) {
+        if model.collapse == .docked { expand() } else { dock(to: edge) }
+    }
+
+    private func collapse(_ mode: ShelfCollapse, to requestedEdge: ShelfEdge?) {
+        guard let panel else { return }
+        expansionTask?.cancel()
+        expansionTask = nil
+        cancelFrameAnimation()
+        hideDockHandleLabel(animated: false)
+        let display = model.collapse == nil
+            ? visibleFrame(for: panel.frame)
+            : collapseDisplayFrame(fallback: panel.frame)
+        guard let visible = display else { return }
+        autoRetractTask?.cancel()
+        let edge = requestedEdge ?? nearestEdge(in: visible)
+        let baseFrame: NSRect
+        if let oldEdge = model.collapseEdge {
+            baseFrame = ShelfWindowGeometry.rested(panel.frame, edge: oldEdge, in: visible)
+        } else {
+            baseFrame = panel.frame
+        }
+
+        model.collapse = mode
+        model.collapseEdge = edge
+        model.isPeeking = false
+        collapseStackDepth = 0
+        collapseVisibleFrame = visible
+        model.selection.removeAll()
+        model.selectionAnchor = nil
+        panel.setFrame(baseFrame, display: true)
+        if mode.revealsOnPointerHover {
+            startHoverWatch()
+        } else {
+            stopHoverWatch()
+        }
+        ShelfManager.shared.restackCollapsedShelves(animated: true)
+    }
+
+    func expand() {
+        guard let panel,
+              model.collapse != nil,
+              let edge = model.collapseEdge,
+              let visible = collapseDisplayFrame(fallback: panel.frame)
+        else { return }
+
+        expansionTask?.cancel()
+        peekTask?.cancel()
+        stopHoverWatch()
+        hideDockHandleLabel()
+        let target = ShelfWindowGeometry.rested(panel.frame, edge: edge, in: visible)
+
+        // Render the full shelf at its still-collapsed position first. Waiting
+        // one run-loop turn gives SwiftUI time to replace the narrow handle,
+        // so the shelf itself is visible while AppKit slides the window in.
+        model.isPeeking = true
+        expansionTask = Task { @MainActor [weak self, weak panel] in
+            await Task.yield()
+            guard !Task.isCancelled,
+                  let self,
+                  let panel,
+                  self.panel === panel,
+                  self.model.collapse != nil,
+                  self.model.isPeeking
+            else { return }
+
+            panel.contentView?.layoutSubtreeIfNeeded()
+            panel.displayIfNeeded()
+            self.setFrame(target, animated: true)
+            try? await Task.sleep(for: .seconds(Self.dockAnimationDuration))
+            guard !Task.isCancelled,
+                  self.model.collapse != nil,
+                  self.model.isPeeking
+            else { return }
+
+            self.model.collapse = nil
+            self.model.collapseEdge = nil
+            self.model.isPeeking = false
+            self.collapseStackDepth = 0
+            self.collapseVisibleFrame = nil
+            self.expansionTask = nil
+            ShelfManager.shared.restackCollapsedShelves(animated: true)
+        }
+    }
+
+    /// Temporarily reveals a retracted shelf for the pointer, or either kind
+    /// of collapsed shelf while a drag is over its drop destination.
+    func peek(_ peeking: Bool) {
+        peekTask?.cancel()
+        guard let panel,
+              let mode = model.collapse,
+              let edge = model.collapseEdge,
+              model.isPeeking != peeking,
+              let visible = collapseDisplayFrame(fallback: panel.frame)
+        else { return }
+
+        model.isPeeking = peeking
+        let target = peeking
+            ? ShelfWindowGeometry.peeked(
+                panel.frame,
+                mode: mode,
+                edge: edge,
+                in: visible,
+                stackDepth: collapseStackDepth
+            )
+            : ShelfWindowGeometry.collapsed(
+                panel.frame,
+                mode: mode,
+                edge: edge,
+                in: visible,
+                stackDepth: collapseStackDepth
+            )
+        setFrame(target, animated: true)
+    }
+
+    func peekAfterDelay(_ seconds: Double = 0.25) {
+        peekTask?.cancel()
+        guard model.collapse != nil, model.isPeeking else { return }
+        peekTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled, let self else { return }
+            if self.model.collapse == .docked {
+                self.peek(false)
+            } else {
+                self.updatePeekForCursor()
+            }
+        }
+    }
+
+    /// Turns a temporary hover reveal into an ordinary shelf without starting
+    /// another frame animation. This is what makes it possible to hover a
+    /// docked shelf and drag its header in one continuous gesture.
+    private func commitPeekForInteraction() {
+        guard let panel, model.collapse != nil, model.isPeeking else { return }
+        expansionTask?.cancel()
+        expansionTask = nil
+        peekTask?.cancel()
+        stopHoverWatch()
+        cancelFrameAnimation()
+
+        // The frame is now the real visible frame because our cancellable
+        // animator writes each intermediate position directly to the panel.
+        panel.setFrame(panel.frame, display: true)
+        model.collapse = nil
+        model.collapseEdge = nil
+        model.isPeeking = false
+        collapseStackDepth = 0
+        collapseVisibleFrame = nil
+        schedulePositionPersistence()
+        ShelfManager.shared.restackCollapsedShelves(animated: true)
+    }
+
+    /// A separate click-through panel avoids the oversized speech-bubble tail
+    /// supplied by `NSPopover`, while still allowing the label to sit outside
+    /// the mostly off-screen shelf window.
+    func setDockHandleHovered(_ hovered: Bool) {
+        guard hovered else {
+            hideDockHandleLabel()
+            return
+        }
+        guard dockHandleLabelPanel == nil,
+              let panel,
+              model.collapse == .docked,
+              !model.isPeeking,
+              let edge = model.collapseEdge,
+              let visible = collapseDisplayFrame(fallback: panel.frame)
+        else { return }
+
+        let label = ShelfHandlePresentation.label(
+            shelfName: model.name,
+            itemTitles: model.items.map(\.title),
+            fallback: model.title
+        )
+        let font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        let measuredWidth = (label as NSString).size(withAttributes: [.font: font]).width
+        let maximumWidth = min(360, visible.width - 32)
+        let labelWidth = min(maximumWidth, ceil(measuredWidth) + 39)
+        let labelSize = NSSize(width: labelWidth, height: 34)
+        let labelFrame = ShelfHandlePresentation.labelFrame(
+            size: labelSize,
+            shelfFrame: panel.frame,
+            edge: edge,
+            visibleFrame: visible
+        )
+        let labelPanel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: labelSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        labelPanel.isOpaque = false
+        labelPanel.backgroundColor = .clear
+        labelPanel.hasShadow = true
+        labelPanel.ignoresMouseEvents = true
+        labelPanel.hidesOnDeactivate = false
+        labelPanel.level = panel.level
+        labelPanel.collectionBehavior = panel.collectionBehavior
+        labelPanel.contentView = NSHostingView(rootView: ShelfHandleLabelView(
+            color: model.color,
+            label: label,
+            size: labelSize
+        ))
+        labelPanel.setFrame(labelFrame, display: false)
+        labelPanel.alphaValue = 0
+        dockHandleLabelPanel = labelPanel
+        panel.addChildWindow(labelPanel, ordered: .above)
+        labelPanel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            labelPanel.animator().alphaValue = 1
+        }
+    }
+
+    private func hideDockHandleLabel(animated: Bool = true) {
+        guard let labelPanel = dockHandleLabelPanel else { return }
+        dockHandleLabelPanel = nil
+        panel?.removeChildWindow(labelPanel)
+        guard animated else {
+            labelPanel.orderOut(nil)
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            labelPanel.animator().alphaValue = 0
+        } completionHandler: {
+            labelPanel.orderOut(nil)
+        }
+    }
+
+    private func startHoverWatch() {
+        guard hoverMonitors.isEmpty else { return }
+        if let global = NSEvent.addGlobalMonitorForEvents(
+            matching: [.mouseMoved, .leftMouseDragged],
+            handler: { [weak self] _ in
+                Task { @MainActor in self?.updatePeekForCursor() }
+            }
+        ) {
+            hoverMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(
+            matching: [.mouseMoved, .leftMouseDragged],
+            handler: { [weak self] event in
+                self?.updatePeekForCursor()
+                return event
+            }
+        ) {
+            hoverMonitors.append(local)
+        }
+    }
+
+    private func stopHoverWatch() {
+        for monitor in hoverMonitors { NSEvent.removeMonitor(monitor) }
+        hoverMonitors.removeAll()
+    }
+
+    private func updatePeekForCursor() {
+        guard let panel,
+              let mode = model.collapse,
+              let edge = model.collapseEdge,
+              mode.revealsOnPointerHover
+        else { return }
+        let interactionFrame = model.isPeeking
+            ? panel.frame
+            : ShelfWindowGeometry.collapsedInteractionFrame(
+                panel.frame,
+                mode: mode,
+                edge: edge,
+                stackDepth: collapseStackDepth
+            )
+        let isInside = interactionFrame.insetBy(dx: -6, dy: -6)
+            .contains(NSEvent.mouseLocation)
+        peek(isInside)
+    }
+
+    func performDoubleClickAction() {
+        switch AppState.shared.shelfDoubleClick {
+        case .none: break
+        case .dock: toggleDock()
+        case .retract:
+            if model.collapse == .retracted { expand() } else { retract() }
+        }
+    }
+
+    func applyCollectionBehavior() {
+        panel?.collectionBehavior = ShelfWindowGeometry.collectionBehavior(
+            keepInCurrentSpace: model.keepInSpace
+        )
+    }
+
+    private func snapIntoPlace() {
+        guard let panel, model.collapse == nil, let visible = visibleFrame(for: panel.frame) else { return }
+        let others = ShelfManager.shared.shelves
+            .filter { $0 !== self }
+            .compactMap(\.frameOnScreen)
+        let target = ShelfWindowGeometry.snapped(panel.frame, to: visible, otherFrames: others)
+        guard target != panel.frame else { return }
+        setFrame(target, animated: true)
+    }
+
+    var frameOnScreen: NSRect? { panel?.frame }
+
+    var collapseStackData: (edge: ShelfEdge, visible: NSRect, frame: NSRect)? {
+        guard model.collapse != nil,
+              let edge = model.collapseEdge,
+              let visible = collapseVisibleFrame,
+              let frame = panel?.frame
+        else { return nil }
+        return (edge, visible, frame)
+    }
+
+    func applyCollapseStackDepth(_ depth: Int, animated: Bool) {
+        collapseStackDepth = max(0, depth)
+        guard let panel,
+              !model.isPeeking,
+              let mode = model.collapse,
+              let edge = model.collapseEdge,
+              let visible = collapseDisplayFrame(fallback: panel.frame)
+        else { return }
+        setFrame(
+            ShelfWindowGeometry.collapsed(
+                panel.frame,
+                mode: mode,
+                edge: edge,
+                in: visible,
+                stackDepth: collapseStackDepth
+            ),
+            animated: animated
+        )
+    }
+
+    func reclampForScreens() {
+        guard let panel else { return }
+        let screenReference = model.collapse == nil ? panel.frame : (collapseVisibleFrame ?? panel.frame)
+        guard let visible = ShelfWindowGeometry.targetVisibleFrame(
+                for: screenReference,
+                visibleFrames: NSScreen.screens.map(\.visibleFrame),
+                cursor: NSEvent.mouseLocation
+              )
+        else { return }
+
+        var target = ShelfWindowGeometry.clamped(panel.frame, to: visible)
+        if let mode = model.collapse, let edge = model.collapseEdge {
+            collapseVisibleFrame = visible
+            target = model.isPeeking
+                ? ShelfWindowGeometry.peeked(
+                    target,
+                    mode: mode,
+                    edge: edge,
+                    in: visible,
+                    stackDepth: collapseStackDepth
+                )
+                : ShelfWindowGeometry.collapsed(
+                    target,
+                    mode: mode,
+                    edge: edge,
+                    in: visible,
+                    stackDepth: collapseStackDepth
+                )
+        }
+        setFrame(target, animated: false)
+    }
+
+    private func collapseDisplayFrame(fallback frame: NSRect) -> NSRect? {
+        ShelfWindowGeometry.targetVisibleFrame(
+            for: collapseVisibleFrame ?? frame,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            cursor: NSEvent.mouseLocation
+        )
+    }
+
+    private func nearestEdge(in visible: NSRect) -> ShelfEdge {
+        guard let panel else { return .right }
+        return panel.frame.midX < visible.midX ? .left : .right
+    }
+
+    private func setFrame(_ frame: NSRect, animated: Bool) {
+        guard let panel else { return }
+        cancelUserMoveTracking()
+        cancelFrameAnimation()
+        guard animated else {
+            panel.setFrame(frame, display: true)
+            return
+        }
+
+        let start = panel.frame
+        guard start != frame else { return }
+        let steps = max(1, Int(ceil(Self.dockAnimationDuration * 60)))
+        let stepDuration = Self.dockAnimationDuration / Double(steps)
+        frameAnimationTask = Task { @MainActor [weak self, weak panel] in
+            for step in 1...steps {
+                try? await Task.sleep(for: .seconds(stepDuration))
+                guard !Task.isCancelled, let self, let panel, self.panel === panel else { return }
+                let progress = CGFloat(step) / CGFloat(steps)
+                let remaining = 1 - progress
+                let eased = 1 - remaining * remaining * remaining
+                panel.setFrame(NSRect(
+                    x: start.origin.x + (frame.origin.x - start.origin.x) * eased,
+                    y: start.origin.y + (frame.origin.y - start.origin.y) * eased,
+                    width: start.width + (frame.width - start.width) * eased,
+                    height: start.height + (frame.height - start.height) * eased
+                ), display: true)
+            }
+            self?.frameAnimationTask = nil
+        }
+    }
+
+    private func cancelFrameAnimation() {
+        frameAnimationTask?.cancel()
+        frameAnimationTask = nil
     }
 
     // MARK: - Geometry
@@ -517,7 +1226,23 @@ final class ShelfController {
         guard abs(frame.height - height) > 0.5 else { return }
         frame.origin.y += frame.height - height
         frame.size.height = height
-        panel.setFrame(clampedToScreen(frame), display: true)
+        if let mode = model.collapse,
+           let edge = model.collapseEdge,
+           !model.isPeeking,
+           let visible = collapseDisplayFrame(fallback: frame) {
+            setFrame(
+                ShelfWindowGeometry.collapsed(
+                    frame,
+                    mode: mode,
+                    edge: edge,
+                    in: visible,
+                    stackDepth: collapseStackDepth
+                ),
+                animated: false
+            )
+        } else {
+            setFrame(clampedToScreen(frame), animated: false)
+        }
     }
 
     private func desiredHeight() -> CGFloat {
@@ -566,17 +1291,28 @@ final class ShelfController {
         case .center:
             origin = NSPoint(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2)
         }
-        panel.setFrame(clampedToScreen(NSRect(origin: origin, size: size)), display: false)
+        var frame = clampedToScreen(NSRect(origin: origin, size: size))
+        if point == nil {
+            frame = ShelfWindowGeometry.avoidingOverlap(
+                frame,
+                in: visible,
+                occupiedFrames: ShelfManager.shared.shelves.compactMap(\.frameOnScreen)
+            )
+        }
+        panel.setFrame(frame, display: false)
     }
 
     private func clampedToScreen(_ frame: NSRect) -> NSRect {
-        let screen = NSScreen.screens.first { $0.frame.intersects(frame) } ?? NSScreen.main
-        guard let screen else { return frame }
-        let visible = screen.visibleFrame
-        var frame = frame
-        frame.origin.x = min(max(frame.minX, visible.minX + 8), visible.maxX - frame.width - 8)
-        frame.origin.y = min(max(frame.minY, visible.minY + 8), visible.maxY - frame.height - 8)
-        return frame
+        guard let visible = visibleFrame(for: frame) else { return frame }
+        return ShelfWindowGeometry.clamped(frame, to: visible)
+    }
+
+    private func visibleFrame(for frame: NSRect) -> NSRect? {
+        ShelfWindowGeometry.targetVisibleFrame(
+            for: frame,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            cursor: NSEvent.mouseLocation
+        )
     }
 }
 
@@ -587,4 +1323,34 @@ private final class ShelfPanel: NSPanel {
     /// Needed for the caret and focus ring in the Customize name field —
     /// the same reason `CanvasWindow` overrides it.
     override var canBecomeMain: Bool { true }
+}
+
+private struct ShelfHandleLabelView: View {
+    let color: Color
+    let label: String
+    let size: NSSize
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(1)
+        }
+        .padding(.horizontal, 12)
+        .frame(width: size.width, height: size.height, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(.ultraThinMaterial)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
 }

@@ -305,3 +305,123 @@ enum ShelfCloseBehavior: String, Codable, CaseIterable, Identifiable {
         }
     }
 }
+
+/// Which side of a display a shelf collapses against.
+enum ShelfEdge: String, Codable, CaseIterable, Identifiable {
+    case left
+    case right
+
+    var id: String { rawValue }
+    var title: String { self == .left ? "Left Edge" : "Right Edge" }
+}
+
+/// A shelf pushed aside. Docked leaves a small tab; retracted leaves enough of
+/// the contents visible to identify the shelf.
+enum ShelfCollapse: String, Codable, CaseIterable {
+    case docked
+    case retracted
+
+    var visibleWidth: CGFloat {
+        switch self {
+        case .docked: return 24
+        case .retracted: return 96
+        }
+    }
+
+    var revealsOnPointerHover: Bool { self == .retracted }
+}
+
+enum ShelfHandlePresentation {
+    static func label(
+        shelfName: String?,
+        itemTitles: [String],
+        fallback: String
+    ) -> String {
+        if let shelfName {
+            let trimmed = shelfName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        guard let first = itemTitles.first else { return fallback }
+        let remaining = itemTitles.count - 1
+        return remaining == 0 ? first : "\(first) + \(remaining) more"
+    }
+
+    static func labelFrame(
+        size: NSSize,
+        shelfFrame: NSRect,
+        edge: ShelfEdge,
+        visibleFrame: NSRect,
+        gap: CGFloat = 8
+    ) -> NSRect {
+        let preferredX = edge == .left
+            ? shelfFrame.maxX + gap
+            : shelfFrame.minX - size.width - gap
+        let maximumX = max(visibleFrame.minX, visibleFrame.maxX - size.width)
+        let x = min(max(preferredX, visibleFrame.minX), maximumX)
+        let preferredY = shelfFrame.midY - size.height / 2
+        let maximumY = max(visibleFrame.minY, visibleFrame.maxY - size.height)
+        let y = min(max(preferredY, visibleFrame.minY), maximumY)
+        return NSRect(origin: NSPoint(x: x, y: y), size: size)
+    }
+}
+
+enum ShelfDoubleClickAction: String, Codable, CaseIterable, Identifiable {
+    case none
+    case dock
+    case retract
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "No Action"
+        case .dock: return "Dock Shelf"
+        case .retract: return "Retract Shelf"
+        }
+    }
+}
+
+enum NotchHighlight: String, Codable, CaseIterable, Identifiable {
+    case whileDragging
+    case onHover
+    case never
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .whileDragging: return "Always While Dragging"
+        case .onHover: return "When Hovering Over Notch"
+        case .never: return "No Highlighting"
+        }
+    }
+
+    func visualState(dragActive: Bool, targeted: Bool) -> NotchVisualState {
+        switch self {
+        case .whileDragging:
+            if targeted { return .targeted }
+            return dragActive ? .ambient : .hidden
+        case .onHover:
+            return targeted ? .targeted : .hidden
+        case .never:
+            return .hidden
+        }
+    }
+
+    func isVisible(dragActive: Bool, targeted: Bool) -> Bool {
+        visualState(dragActive: dragActive, targeted: targeted) != .hidden
+    }
+}
+
+enum NotchVisualState: Equatable {
+    case hidden
+    case ambient
+    case targeted
+}
+
+enum ShelfTransferOperation: Equatable {
+    case move
+    case copy
+
+    var dragOperation: NSDragOperation { self == .copy ? .copy : .move }
+}

@@ -64,6 +64,9 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case shelfCopy
     case shelfPaste
     case shelfSelectAll
+    case shelfDock
+    case shelfDockLeft
+    case shelfDockRight
     case shelfCustomize
     case shelfNewFromClipboard
 
@@ -90,6 +93,9 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .shelfCopy: return "Copy selection"
         case .shelfPaste: return "Add from clipboard"
         case .shelfSelectAll: return "Select all"
+        case .shelfDock: return "Dock to nearest edge"
+        case .shelfDockLeft: return "Dock to left edge"
+        case .shelfDockRight: return "Dock to right edge"
         case .shelfCustomize: return "Customize shelf"
         case .shelfNewFromClipboard: return "New shelf from clipboard"
         }
@@ -116,6 +122,9 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .shelfCopy: return KeyBinding(keyCode: 8, modifiers: [.command])    // ⌘C
         case .shelfPaste: return KeyBinding(keyCode: 9, modifiers: [.command])   // ⌘V
         case .shelfSelectAll: return KeyBinding(keyCode: 0, modifiers: [.command]) // ⌘A
+        case .shelfDock: return KeyBinding(keyCode: 2, modifiers: [.command])    // ⌘D
+        case .shelfDockLeft: return KeyBinding(keyCode: 123, modifiers: [.command, .option]) // ⌥⌘←
+        case .shelfDockRight: return KeyBinding(keyCode: 124, modifiers: [.command, .option]) // ⌥⌘→
         case .shelfCustomize: return KeyBinding(keyCode: 34, modifiers: [.command]) // ⌘I
         case .shelfNewFromClipboard: return KeyBinding(keyCode: 45, modifiers: [.command]) // ⌘N
         }

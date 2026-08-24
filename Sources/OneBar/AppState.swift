@@ -255,6 +255,34 @@ final class AppState {
         didSet { UserDefaults.standard.set(shelfLayout.rawValue, forKey: "shelfLayout") }
     }
 
+    /// Move a new shelf aside once after its first accepted drop.
+    var shelfAutoRetract: Bool {
+        didSet { UserDefaults.standard.set(shelfAutoRetract, forKey: "shelfAutoRetract") }
+    }
+
+    /// Align a shelf to display edges and nearby shelves after a user drag.
+    var shelfSnap: Bool {
+        didSet { UserDefaults.standard.set(shelfSnap, forKey: "shelfSnap") }
+    }
+
+    var shelfDoubleClick: ShelfDoubleClickAction {
+        didSet { UserDefaults.standard.set(shelfDoubleClick.rawValue, forKey: "shelfDoubleClick") }
+    }
+
+    /// New shelves normally join every Space; this keeps them in the Space in
+    /// which they were opened instead.
+    var shelfKeepInSpace: Bool {
+        didSet { UserDefaults.standard.set(shelfKeepInSpace, forKey: "shelfKeepInSpace") }
+    }
+
+    var shelfNotchDrop: Bool {
+        didSet { UserDefaults.standard.set(shelfNotchDrop, forKey: "shelfNotchDrop") }
+    }
+
+    var shelfNotchHighlight: NotchHighlight {
+        didSet { UserDefaults.standard.set(shelfNotchHighlight.rawValue, forKey: "shelfNotchHighlight") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -336,7 +364,13 @@ final class AppState {
             "shelfCloseBehavior": "whenMoved",
             "shelfColorLabels": true,
             "shelfTakesFocus": false,
-            "shelfLayout": "grid"
+            "shelfLayout": "grid",
+            "shelfAutoRetract": false,
+            "shelfSnap": true,
+            "shelfDoubleClick": "dock",
+            "shelfKeepInSpace": false,
+            "shelfNotchDrop": true,
+            "shelfNotchHighlight": "onHover"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
         clipboardEnabled = defaults.bool(forKey: "clipboardEnabled")
@@ -388,5 +422,15 @@ final class AppState {
         shelfColorLabels = defaults.bool(forKey: "shelfColorLabels")
         shelfTakesFocus = defaults.bool(forKey: "shelfTakesFocus")
         shelfLayout = ShelfLayout(rawValue: defaults.string(forKey: "shelfLayout") ?? "") ?? .grid
+        shelfAutoRetract = defaults.bool(forKey: "shelfAutoRetract")
+        shelfSnap = defaults.bool(forKey: "shelfSnap")
+        shelfDoubleClick = ShelfDoubleClickAction(
+            rawValue: defaults.string(forKey: "shelfDoubleClick") ?? ""
+        ) ?? .dock
+        shelfKeepInSpace = defaults.bool(forKey: "shelfKeepInSpace")
+        shelfNotchDrop = defaults.bool(forKey: "shelfNotchDrop")
+        shelfNotchHighlight = NotchHighlight(
+            rawValue: defaults.string(forKey: "shelfNotchHighlight") ?? ""
+        ) ?? .onHover
     }
 }

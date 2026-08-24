@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 final class ShelfDropView: NSView {
     weak var controller: ShelfController?
 
-    private static let acceptedTypes: [NSPasteboard.PasteboardType] = {
+    static let acceptedTypes: [NSPasteboard.PasteboardType] = {
         var types: [NSPasteboard.PasteboardType] = [
             .fileURL, .URL, .string, .rtf, .rtfd, .png, .tiff, .html
         ]
@@ -33,32 +33,53 @@ final class ShelfDropView: NSView {
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let operation = operation(for: sender)
         controller?.model.isDropTargeted = !operation.isEmpty
+        if !operation.isEmpty { controller?.peek(true) }
         return operation
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        operation(for: sender)
+        let operation = operation(for: sender)
+        controller?.model.isDropTargeted = !operation.isEmpty
+        return operation
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         controller?.model.isDropTargeted = false
+        controller?.peekAfterDelay()
     }
 
     override func draggingEnded(_ sender: NSDraggingInfo) {
         controller?.model.isDropTargeted = false
+        controller?.peekAfterDelay()
     }
 
-    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        !operation(for: sender).isEmpty
+    }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         controller?.model.isDropTargeted = false
-        guard controller != nil else { return false }
+        guard let controller else { return false }
+
+        if let source = sender.draggingSource as? ShelfDragSourceView,
+           let sourceController = source.controller {
+            let transferred = ShelfManager.shared.transfer(
+                source.draggedItems,
+                from: sourceController,
+                to: controller,
+                operation: transferOperation()
+            )
+            controller.peekAfterDelay()
+            return transferred
+        }
+
         ShelfItemReader.read(from: sender) { [weak controller] items in
             guard let controller, controller.isActive else {
                 ShelfStore.shared.discard(items)
                 return
             }
             controller.add(items)
+            controller.peekAfterDelay()
         }
         return true
     }
@@ -72,6 +93,8 @@ final class ShelfDropView: NSView {
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
         panel.dataSource = self
         panel.delegate = self
+        panel.reloadData()
+        panel.currentPreviewItemIndex = controller?.previewSelectionIndex ?? 0
     }
 
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
@@ -83,8 +106,17 @@ final class ShelfDropView: NSView {
     /// A drag out of our own shelf is a rearrange, not a copy of the file into
     /// itself, and offering `.copy` there would let Finder duplicate it.
     private func operation(for sender: NSDraggingInfo) -> NSDragOperation {
-        if (sender.draggingSource as? ShelfDragSourceView)?.controller === controller { return [] }
+        if let source = sender.draggingSource as? ShelfDragSourceView {
+            guard source.controller !== controller,
+                  controller?.canAccept(source.draggedItems) == true
+            else { return [] }
+            return transferOperation().dragOperation
+        }
         return .copy
+    }
+
+    private func transferOperation() -> ShelfTransferOperation {
+        ShelfTransferLogic.currentOperation()
     }
 }
 
@@ -186,7 +218,6 @@ enum ShelfItemReader {
         let deliveryID = UUID()
         promiseQueues[deliveryID] = queue
         var remaining = 0
-        var deliveredAny = false
         for receiver in receivers {
             receiver.receivePromisedFiles(
                 atDestination: destination,
@@ -198,14 +229,17 @@ enum ShelfItemReader {
                         remaining -= 1
                         if remaining == 0 {
                             promiseQueues[deliveryID] = nil
-                            if !deliveredAny {
-                                ShelfStore.shared.discardPromiseDestination(destination)
-                            }
+                            ShelfStore.shared.discardPromiseDestination(destination)
                         }
                     }
-                    guard error == nil, var item = fileItem(for: url) else { return }
+                    guard error == nil,
+                          let adoptedURL = ShelfStore.shared.adoptPromisedFile(
+                            at: url,
+                            from: destination
+                          ),
+                          var item = fileItem(for: adoptedURL)
+                    else { return }
                     item.isMaterialised = true
-                    deliveredAny = true
                     completion([item])
                 }
             }

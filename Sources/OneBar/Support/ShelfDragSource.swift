@@ -14,6 +14,7 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
     var onSelect: ((NSEvent) -> Void)?
     var onClickRelease: ((NSEvent) -> Void)?
     var onDoubleClick: (() -> Void)?
+    private(set) var draggedItems: [ShelfItem] = []
 
     private var mouseDownPoint: NSPoint?
     private var beganDrag = false
@@ -60,6 +61,7 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
         guard !items.isEmpty else { return }
 
         var draggingItems: [NSDraggingItem] = []
+        var representedItems: [ShelfItem] = []
         for (index, item) in items.enumerated() {
             guard let writer = controller.pasteboardWriter(for: item) else { continue }
             let dragging = NSDraggingItem(pasteboardWriter: writer)
@@ -70,10 +72,12 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
                 contents: ShelfThumbnails.shared.cached(for: item)
             )
             draggingItems.append(dragging)
+            representedItems.append(item)
         }
         guard !draggingItems.isEmpty else { return }
 
-        controller.willBeginDragOut(items)
+        draggedItems = representedItems
+        controller.willBeginDragOut(representedItems)
         let session = beginDraggingSession(with: draggingItems, event: event, source: self)
         session.animatesToStartingPositionsOnCancelOrFail = true
         session.draggingFormation = .stack
@@ -92,7 +96,11 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
             // when ⌥ is held. Narrowing to `.copy` is the whole implementation
             // of the "always copy" preference.
             return AppState.shared.shelfAlwaysCopy ? .copy : [.copy, .move]
-        default:
+        case .withinApplication:
+            // Shelf-to-shelf and shelf-to-notch use their own ownership-aware
+            // transfer path. Move is the default; Option chooses copy.
+            return [.copy, .move]
+        @unknown default:
             return []
         }
     }
@@ -103,6 +111,7 @@ final class ShelfDragSourceView: NSView, NSDraggingSource {
         operation: NSDragOperation
     ) {
         controller?.didEndDragOut(operation: operation)
+        draggedItems = []
     }
 }
 

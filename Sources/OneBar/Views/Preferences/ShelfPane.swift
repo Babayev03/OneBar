@@ -15,6 +15,7 @@ struct ShelfPane: View {
 
     @State private var section: Section = .activation
     @State private var selectedApp: IgnoredApp.ID?
+    @State private var hasNotchedDisplay = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -37,6 +38,12 @@ struct ShelfPane: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
             }
+        }
+        .onAppear { refreshNotchAvailability() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didChangeScreenParametersNotification
+        )) { _ in
+            refreshNotchAvailability()
         }
     }
 
@@ -61,7 +68,35 @@ struct ShelfPane: View {
                         .frame(width: 140)
                         .disabled(!state.shelfEnabled || !state.shelfShakeEnabled)
                     }
-                    row("Default shelf location", subtitle: "For shelves created without shaking.") {
+                    Divider()
+                    row(
+                        "Drop to notch",
+                        subtitle: hasNotchedDisplay
+                            ? "Drag files onto the notch to create a shelf. This remains available when shake activation is off."
+                            : "Requires a display with a notch."
+                    ) {
+                        Toggle("", isOn: notchBinding)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .disabled(!state.shelfEnabled || !hasNotchedDisplay)
+                    }
+                    row("Notch highlight", subtitle: nil) {
+                        Picker("", selection: notchHighlightBinding) {
+                            ForEach(NotchHighlight.allCases) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 210)
+                        .disabled(
+                            !state.shelfEnabled
+                                || !state.shelfNotchDrop
+                                || !hasNotchedDisplay
+                        )
+                    }
+                    Divider()
+                    row(
+                        "New and notch shelf location",
+                        subtitle: "Used by notch drops, New Shelf, and shelf shortcuts. A shake shelf always opens at the cursor."
+                    ) {
                         Picker("", selection: locationBinding) {
                             ForEach(ShelfLocation.allCases) { Text($0.title).tag($0) }
                         }
@@ -153,6 +188,23 @@ struct ShelfPane: View {
                         }
                         .labelsHidden()
                         .frame(width: 120)
+                    }
+                    Divider()
+                    row("Automatically retract", subtitle: "After its first accepted drop, a new shelf moves aside once to the nearest edge.") {
+                        Toggle("", isOn: autoRetractBinding).toggleStyle(.switch).labelsHidden()
+                    }
+                    row("Snap into place", subtitle: "Aligns a shelf to display edges and other shelves after you move it. Hold ⌘ during that move to suppress snapping.") {
+                        Toggle("", isOn: snapBinding).toggleStyle(.switch).labelsHidden()
+                    }
+                    row("Restrict to current Space", subtitle: "Applies to new shelves; each shelf can override it from Customize or its overflow menu.") {
+                        Toggle("", isOn: keepInSpaceBinding).toggleStyle(.switch).labelsHidden()
+                    }
+                    row("Double-click shelf header", subtitle: nil) {
+                        Picker("", selection: doubleClickBinding) {
+                            ForEach(ShelfDoubleClickAction.allCases) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 150)
                     }
                     Divider()
                     row("Close shelf after dragging out", subtitle: nil) {
@@ -365,7 +417,7 @@ struct ShelfPane: View {
     private var shakeBinding: Binding<Bool> {
         Binding(get: { state.shelfShakeEnabled }, set: {
             state.shelfShakeEnabled = $0
-            ShakeDetector.shared.restart()
+            ShelfDragObserver.shared.restart()
         })
     }
 
@@ -402,6 +454,37 @@ struct ShelfPane: View {
 
     private var layoutBinding: Binding<ShelfLayout> {
         Binding(get: { state.shelfLayout }, set: { state.shelfLayout = $0 })
+    }
+
+    private var autoRetractBinding: Binding<Bool> {
+        Binding(get: { state.shelfAutoRetract }, set: { state.shelfAutoRetract = $0 })
+    }
+
+    private var snapBinding: Binding<Bool> {
+        Binding(get: { state.shelfSnap }, set: { state.shelfSnap = $0 })
+    }
+
+    private var keepInSpaceBinding: Binding<Bool> {
+        Binding(get: { state.shelfKeepInSpace }, set: { state.shelfKeepInSpace = $0 })
+    }
+
+    private var doubleClickBinding: Binding<ShelfDoubleClickAction> {
+        Binding(get: { state.shelfDoubleClick }, set: { state.shelfDoubleClick = $0 })
+    }
+
+    private var notchBinding: Binding<Bool> {
+        Binding(get: { state.shelfNotchDrop }, set: {
+            state.shelfNotchDrop = $0
+            ShelfDragObserver.shared.restart()
+        })
+    }
+
+    private var notchHighlightBinding: Binding<NotchHighlight> {
+        Binding(get: { state.shelfNotchHighlight }, set: { state.shelfNotchHighlight = $0 })
+    }
+
+    private func refreshNotchAvailability() {
+        hasNotchedDisplay = ShelfWindowGeometry.hasNotchedDisplay
     }
 
     private func addApp() {

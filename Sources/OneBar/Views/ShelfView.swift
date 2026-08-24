@@ -24,22 +24,53 @@ struct ShelfView: View {
                 ShelfCustomizeView(controller: controller)
             }
         }
+        .opacity(showsDockHandle ? 0 : 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: shelfCornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: shelfCornerRadius, style: .continuous)
                 .strokeBorder(
                     model.isDropTargeted ? model.color : Color.primary.opacity(0.1),
                     lineWidth: model.isDropTargeted ? 2 : 1
                 )
         }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(alignment: collapsedHandleAlignment) {
+            if showsDockHandle {
+                Image(systemName: model.collapseEdge == .left ? "chevron.right" : "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.secondary.opacity(0.72))
+                    .frame(width: ShelfCollapse.docked.visibleWidth)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .onHover { controller.setDockHandleHovered($0) }
+                    .accessibilityLabel("Show \(dockHandleLabel)")
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: shelfCornerRadius, style: .continuous))
         .opacity(model.isPresented ? 1 : 0)
         .scaleEffect(model.isPresented ? 1 : 0.94)
         .animation(.easeOut(duration: 0.12), value: model.isDropTargeted)
+    }
+
+    private var showsDockHandle: Bool {
+        model.collapse == .docked && !model.isPeeking
+    }
+
+    private var shelfCornerRadius: CGFloat { 18 }
+
+    private var dockHandleLabel: String {
+        ShelfHandlePresentation.label(
+            shelfName: model.name,
+            itemTitles: model.items.map(\.title),
+            fallback: model.title
+        )
+    }
+
+    private var collapsedHandleAlignment: Alignment {
+        model.collapseEdge == .left ? .trailing : .leading
     }
 
     // MARK: - Header
@@ -85,6 +116,20 @@ struct ShelfView: View {
                 }
             }
             .pickerStyle(.inline)
+
+            Divider()
+            Menu("Move Aside") {
+                Button("Dock to Left Edge") { controller.dock(to: .left) }
+                Button("Dock to Right Edge") { controller.dock(to: .right) }
+                Divider()
+                Button("Retract to Left Edge") { controller.retract(to: .left) }
+                Button("Retract to Right Edge") { controller.retract(to: .right) }
+                if model.collapse != nil {
+                    Divider()
+                    Button("Bring Back") { controller.expand() }
+                }
+            }
+            Toggle("Keep in this Space", isOn: keepInSpaceBinding)
 
             if !manager.pinned.isEmpty || !manager.recent.isEmpty {
                 Divider()
@@ -223,6 +268,10 @@ struct ShelfView: View {
 
     private var layoutBinding: Binding<ShelfLayout> {
         Binding(get: { model.layout }, set: { controller.setLayout($0) })
+    }
+
+    private var keepInSpaceBinding: Binding<Bool> {
+        Binding(get: { model.keepInSpace }, set: { controller.setKeepInSpace($0) })
     }
 }
 

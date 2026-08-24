@@ -90,6 +90,27 @@ final class ShelfStore {
         try? FileManager.default.removeItem(at: url)
     }
 
+    /// Moves one delivered promise out of the shared batch directory and into
+    /// its own ownership directory. Removing that item can then never delete a
+    /// sibling promised by the same drag.
+    func adoptPromisedFile(at source: URL, from batchDirectory: URL) -> URL? {
+        guard isDirectChildOfItemsDirectory(batchDirectory),
+              source.deletingLastPathComponent().standardizedFileURL
+                == batchDirectory.standardizedFileURL
+        else { return nil }
+
+        let itemDirectory = itemsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let destination = itemDirectory.appendingPathComponent(source.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: itemDirectory, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: source, to: destination)
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: itemDirectory)
+            return nil
+        }
+    }
+
     /// Deletes only what we wrote. A referenced file is the user's, and removing
     /// an item from a shelf must never touch it.
     func discard(_ items: [ShelfItem], keeping retainedItems: [ShelfItem] = []) {
@@ -112,6 +133,40 @@ final class ShelfStore {
             } else if isDirectChildOfItemsDirectory(url) {
                 try? FileManager.default.removeItem(at: url)
             }
+        }
+    }
+
+    /// Makes an independent item for Option-copy between shelves. Referenced
+    /// user files keep pointing at the original; OneBar-owned materializations
+    /// are physically cloned so either shelf can later delete its own copy.
+    func copyForShelf(_ item: ShelfItem) -> ShelfItem? {
+        guard item.isMaterialised, let path = item.path else {
+            return duplicate(item, path: item.path, bookmark: item.bookmark, materialised: false)
+        }
+
+        let source = URL(fileURLWithPath: path)
+        guard ownsMaterialisation(at: source) else {
+            // A corrupt legacy flag must never turn a user file into something
+            // OneBar believes it owns.
+            return duplicate(item, path: item.path, bookmark: item.bookmark, materialised: false)
+        }
+        guard FileManager.default.fileExists(atPath: source.path),
+              let destinationFolder = promiseDestination()
+        else { return nil }
+
+        let destination = destinationFolder.appendingPathComponent(source.lastPathComponent)
+        do {
+            try FileManager.default.copyItem(at: source, to: destination)
+            return duplicate(
+                item,
+                path: destination.path,
+                bookmark: try? destination.bookmarkData(),
+                materialised: true,
+                byteSize: fileSize(of: destination)
+            )
+        } catch {
+            discardPromiseDestination(destinationFolder)
+            return nil
         }
     }
 
@@ -161,5 +216,30 @@ final class ShelfStore {
 
     private func isDirectChildOfItemsDirectory(_ url: URL) -> Bool {
         url.deletingLastPathComponent().standardizedFileURL == itemsDirectory.standardizedFileURL
+    }
+
+    private func ownsMaterialisation(at url: URL) -> Bool {
+        isDirectChildOfItemsDirectory(url) || isDirectChildOfItemsDirectory(url.deletingLastPathComponent())
+    }
+
+    private func duplicate(
+        _ item: ShelfItem,
+        path: String?,
+        bookmark: Data?,
+        materialised: Bool,
+        byteSize: Int? = nil
+    ) -> ShelfItem {
+        ShelfItem(
+            kind: item.kind,
+            path: path,
+            bookmark: bookmark,
+            text: item.text,
+            rtfData: item.rtfData,
+            linkString: item.linkString,
+            title: item.title,
+            byteSize: byteSize ?? item.byteSize,
+            addedAt: Date(),
+            isMaterialised: materialised
+        )
     }
 }
