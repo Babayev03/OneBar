@@ -39,7 +39,7 @@ enum ShelfActionRunner {
             NSWorkspace.shared.activateFileViewerSelecting(subject.fileURLs)
         case .rename:
             guard let item = subject.items.first else { return }
-            rename(item, in: controller)
+            controller.beginRename(item.id)
         case .copy:
             controller.copySelection()
         case .addFromClipboard:
@@ -95,55 +95,6 @@ enum ShelfActionRunner {
             withApplicationAt: application,
             configuration: NSWorkspace.OpenConfiguration()
         )
-    }
-
-    // MARK: - Renaming
-
-    private static func rename(_ item: ShelfItem, in controller: ShelfController) {
-        guard let url = item.resolveURL() else { return }
-        let name = url.lastPathComponent
-
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.stringValue = name
-
-        let alert = NSAlert()
-        alert.messageText = "Rename “\(name)”"
-        alert.informativeText = item.isMaterialised
-            ? "This file was written by OneBar for a dropped item."
-            : "The file is renamed on disk, wherever it lives."
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        let entered = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !entered.isEmpty, entered != name else { return }
-        // A slash in a file name is a path separator, not a character — the
-        // rename would land somewhere else entirely.
-        guard !entered.contains("/"), !entered.hasPrefix(".") else {
-            HUD.show("That name is not allowed", symbol: "exclamationmark.triangle")
-            return
-        }
-
-        // Renaming within the same folder is what keeps a materialised file
-        // inside OneBar's own directory, and so still owned by the store.
-        let destination = url.deletingLastPathComponent().appendingPathComponent(entered)
-        do {
-            try FileManager.default.moveItem(at: url, to: destination)
-        } catch {
-            HUD.show(
-                FileManager.default.fileExists(atPath: destination.path)
-                    ? "A file with that name already exists"
-                    : "Could not rename",
-                symbol: "exclamationmark.triangle"
-            )
-            return
-        }
-        controller.relocate(item.id, to: destination)
-        HUD.show("Renamed", symbol: "pencil")
     }
 
     // MARK: - Shelf to shelf

@@ -6,9 +6,9 @@
 
 <p align="center">
   A free, open-source macOS menubar utility — clipboard history with OCR & QR superpowers,
-  system monitoring, brightness for every display, sound with per-app volume, keyboard cleaning,
-  prevent-sleep, auto mouse move, and a visual auto clicker with turbo mode.
-  One icon, everything at hand.
+  a drag-and-drop shelf, system monitoring, brightness for every display, sound with per-app
+  volume, keyboard cleaning, prevent-sleep, auto mouse move, and a visual auto clicker with
+  turbo mode. One icon, everything at hand.
 </p>
 
 <p align="center">
@@ -45,6 +45,32 @@ Keyboard-driven panel (every key remappable in Preferences):
 | `Space` | Full preview |
 | `Tab` | Cycle filters |
 | `Delete` | Delete item |
+
+### 🗄️ Shelf
+Drag a file from one window to another without both being visible at once. **Shake the cursor mid-drag** and a shelf appears under it — drop things in, go anywhere, then drag them all back out together. On a MacBook with a notch you can **drop onto the notch** instead.
+
+- **Nothing is ever copied.** A shelf holds *references*, so it costs no disk space and deleting a shelf never deletes your files. Dropped text and images have no file to reference, so OneBar writes one — that is the only thing it writes, and it is what lets you drag a snippet of text straight into Finder as a `.txt`
+- **Native drag-out semantics**: same volume moves, different volume copies, `⌥` forces a copy — because the shelf offers macOS both operations and lets the destination decide. There is a preference to always copy
+- **Several shelves at once**, each with its own name and colour. **Pin** one and it comes back at launch; close one by accident and it waits on a recents list
+- **Dock or retract** a shelf to a screen edge, where it collapses to a tab that peeks on hover. Snap-to-edge on move, `⌘` to suppress it, and an option to keep a shelf in the Space it was opened in
+- **Grid or list**, multi-selection, Quick Look, and per-item actions: Open, Open With, Show in Finder, **rename in place** (Finder-style — the base name is selected, the extension is not), Copy, Move to New Shelf, **Share** via the real AirDrop / Mail / Messages sheet, and Move to Trash
+- **Ignored apps** — add an app and shaking inside it never summons a shelf
+- Needs **no permission at all**: watching for a shake uses mouse monitors, and only *keyboard* monitors require Accessibility
+
+| Key | Action |
+| --- | --- |
+| `Space` | Quick Look |
+| `Return` | Rename in place |
+| `⌘O` | Open |
+| `⌘R` | Show in Finder |
+| `⌘C` / `⌘V` | Copy selection / add from clipboard |
+| `⌘A` | Select all |
+| `Delete` | Remove from shelf |
+| `⌘Delete` | Clear shelf |
+| `⌘D` / `⌥⌘←` / `⌥⌘→` | Dock to nearest / left / right edge |
+| `⌘I` | Customize (name, colour, pin) |
+| `⌘N` | New shelf from clipboard |
+| `⌘W` / `⇧⌘W` | Close shelf / close all |
 
 ### 📊 System monitoring
 - CPU / memory / disk rings in the popover with configurable warning & critical thresholds
@@ -127,12 +153,12 @@ That builds a release binary, assembles `OneBar.app`, ad-hoc signs it, installs 
 
 macOS will ask for these on first use of the corresponding feature:
 
-- **Accessibility** — required for keyboard cleaning, auto mouse move, auto click, and pasting into other apps (System Settings → Privacy & Security → Accessibility). Also used, if you have already granted it, to keep the volume keys working under an output group — that one never prompts, because being asked for a permission just for picking an audio device would be baffling
+- **Accessibility** — required for keyboard cleaning, auto mouse move, auto click, and pasting into other apps (System Settings → Privacy & Security → Accessibility)
 - **Screen Recording** — required for Scan Text / Scan QR
 - **System Audio Recording** — required only for **per-app volume**. macOS calls reading an app's audio "recording"; it is played straight back out at the level you picked, and nothing is stored or sent anywhere
 - **Microphone** — only if you switch on the input level meter, and only while the Sound screen is open
 
-Display brightness and Pick color need **none of them** — DDC/CI, the built-in backlight and the system color sampler are all permission-free.
+Display brightness, Pick color and the Shelf need **none of them** — DDC/CI, the built-in backlight, the system color sampler and mouse-only event monitors are all permission-free.
 
 Everything runs **100% on-device**. OneBar makes no network requests, ever.
 
@@ -142,6 +168,7 @@ Everything runs **100% on-device**. OneBar makes no network requests, ever.
 - Live menubar stats, update frequency, ring thresholds
 - Image limit & optional history cap
 - Ignored apps
+- Shelf: shake on/off and sensitivity, drop-to-notch and its highlight, where a shelf opens, grid or list, keep dropped text as plain text, always copy when dragging out, when to close after a drag out, retract after the first drop, snap on move, what double-clicking a shelf edge does, per-shelf colours, and its own ignored-apps list
 - Fully remappable shortcuts, including global ones for the clipboard panel (`⌘H`), the Auto Click canvas (`⌥⌘C`), turbo click (`⌥⌘T`) and pick color (`⌥⌘P`)
 - What `⌘Q` does — ask first, quit, or do nothing (the Quit button in the menu always quits)
 - Keyboard-cleaning duration, prevent-sleep auto-off and display-sleep behavior, accent color

@@ -9,6 +9,7 @@ struct ShelfItemCell: View {
 
     private var model: ShelfModel { controller.model }
     private var isSelected: Bool { model.selection.contains(item.id) }
+    private var isRenaming: Bool { model.renamingItemID == item.id }
 
     var body: some View {
         Group {
@@ -23,19 +24,23 @@ struct ShelfItemCell: View {
         }
         .help(helpText)
         // The drag source sits over the cell and owns its clicks — see
-        // ShelfDragSource for why this is AppKit and not `.draggable`.
+        // ShelfDragSource for why this is AppKit and not `.draggable`. It is
+        // left off while the name is being edited, or it would swallow every
+        // click meant for the field.
         .overlay {
-            ShelfDragSource(
-                itemID: item.id,
-                controller: controller,
-                onSelect: select,
-                onClickRelease: finishSelection,
-                onDoubleClick: open
-            )
+            if !isRenaming {
+                ShelfDragSource(
+                    itemID: item.id,
+                    controller: controller,
+                    onSelect: select,
+                    onClickRelease: finishSelection,
+                    onDoubleClick: open
+                )
+            }
         }
         // Above the drag source, so it stays clickable.
         .overlay(alignment: model.layout == .grid ? .topTrailing : .trailing) {
-            if isSelected {
+            if isSelected, !isRenaming {
                 Button {
                     controller.remove([item.id])
                 } label: {
@@ -60,11 +65,16 @@ struct ShelfItemCell: View {
         VStack(spacing: 4) {
             icon
                 .frame(width: 40, height: 40)
-            Text(item.title)
-                .font(.system(size: 10))
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(isPresentOnDisk ? .primary : .secondary)
+            if isRenaming {
+                renameField(centred: true)
+                    .frame(height: 20)
+            } else {
+                Text(item.title)
+                    .font(.system(size: 10))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(isPresentOnDisk ? .primary : .secondary)
+            }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 4)
@@ -77,12 +87,17 @@ struct ShelfItemCell: View {
             icon
                 .frame(width: 20, height: 20)
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.title)
-                    .font(.system(size: 11))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(isPresentOnDisk ? .primary : .secondary)
-                if let subtitle = item.subtitle {
+                if isRenaming {
+                    renameField(centred: false)
+                        .frame(height: 20)
+                } else {
+                    Text(item.title)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(isPresentOnDisk ? .primary : .secondary)
+                }
+                if let subtitle = item.subtitle, !isRenaming {
                     Text(subtitle)
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
@@ -93,6 +108,15 @@ struct ShelfItemCell: View {
         }
         .padding(.horizontal, 7)
         .frame(height: ShelfController.rowHeight)
+    }
+
+    private func renameField(centred: Bool) -> some View {
+        ShelfRenameField(
+            name: item.title,
+            centred: centred,
+            onCommit: { controller.commitRename(item.id, to: $0) },
+            onCancel: { controller.cancelRename() }
+        )
     }
 
     @ViewBuilder

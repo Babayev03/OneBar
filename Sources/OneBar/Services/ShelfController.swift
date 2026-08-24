@@ -18,6 +18,8 @@ final class ShelfModel {
     var isPresented = false
 
     var route: ShelfRoute = .items
+    /// The item whose name is being edited in place, if any.
+    var renamingItemID: UUID?
     var name: String?
     var colorName: String?
     var colorSource: ShelfColorSource = .automatic
@@ -189,6 +191,7 @@ final class ShelfController {
             }
 
             guard let panel = self.panel, event.window === panel else { return event }
+            self.commitRenameIfEditing(clickedAt: event.locationInWindow)
             // A real grab always wins over a peek, retract, dock, or snap
             // animation. Cancelling here prevents an old target from pulling
             // the shelf away after AppKit starts the user's window drag.
@@ -235,6 +238,10 @@ final class ShelfController {
 
     private func handle(_ event: NSEvent) -> Bool {
         if event.keyCode == 53 {
+            // While a name is being edited Esc belongs to the field editor,
+            // which cancels the rename. This monitor sees the key first, so it
+            // has to decline it rather than close the shelf out from under it.
+            if model.renamingItemID != nil { return false }
             if model.route == .customize { showItems() }
             else if model.collapse != nil { expand() }
             else { close() }
@@ -277,6 +284,10 @@ final class ShelfController {
         }
         if matches(.shelfShowInFinder) {
             ShelfActionRunner.perform(.showInFinder, scope: .selection, in: self)
+            return true
+        }
+        if matches(.shelfRename) {
+            ShelfActionRunner.perform(.rename, scope: .selection, in: self)
             return true
         }
         return false
@@ -508,6 +519,67 @@ final class ShelfController {
 
     func clear() {
         remove(Set(model.items.map(\.id)))
+    }
+
+    // MARK: - Renaming
+
+    /// Turns the item's label into a field. Editing needs focus, which the
+    /// shelf otherwise never takes — the same trade Customize makes.
+    func beginRename(_ id: UUID) {
+        guard isActive,
+              let item = model.items.first(where: { $0.id == id }),
+              item.resolveURL() != nil
+        else { return }
+        model.selection = [id]
+        model.selectionAnchor = id
+        model.renamingItemID = id
+        panel?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func cancelRename() {
+        model.renamingItemID = nil
+    }
+
+    /// A click anywhere but the field itself keeps what was typed, as it does
+    /// in Finder. Resigning first responder is what commits it.
+    private func commitRenameIfEditing(clickedAt point: NSPoint) {
+        guard model.renamingItemID != nil, let panel, let content = panel.contentView else { return }
+        let hit = content.hitTest(content.convert(point, from: nil))
+        guard !(hit is NSTextView || hit is NSTextField) else { return }
+        panel.makeFirstResponder(nil)
+    }
+
+    func commitRename(_ id: UUID, to entered: String) {
+        model.renamingItemID = nil
+        guard let item = model.items.first(where: { $0.id == id }),
+              let url = item.resolveURL()
+        else { return }
+
+        let name = entered.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != url.lastPathComponent else { return }
+        // A slash is a path separator, not a character: the rename would land
+        // somewhere else entirely. A leading dot hides the file from Finder.
+        guard !name.contains("/"), !name.hasPrefix(".") else {
+            HUD.show("That name is not allowed", symbol: "exclamationmark.triangle")
+            return
+        }
+
+        // Renaming inside the same folder is what keeps a materialised file a
+        // child of OneBar's own directory, and so still owned by the store.
+        let destination = url.deletingLastPathComponent().appendingPathComponent(name)
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+        } catch {
+            HUD.show(
+                FileManager.default.fileExists(atPath: destination.path)
+                    ? "A file with that name already exists"
+                    : "Could not rename",
+                symbol: "exclamationmark.triangle"
+            )
+            return
+        }
+        relocate(id, to: destination)
     }
 
     /// Points an item at the file it just became. The bookmark is rewritten too:
