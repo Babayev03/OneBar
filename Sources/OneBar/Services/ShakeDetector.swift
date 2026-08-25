@@ -48,7 +48,7 @@ final class ShakeDetector {
 
         lastFired = now
         samples.removeAll()
-        ShelfManager.shared.newShelf(at: point)
+        ShelfManager.shared.newShelf(at: point, focus: .afterFirstDrop)
     }
 
     func dragEnded() {

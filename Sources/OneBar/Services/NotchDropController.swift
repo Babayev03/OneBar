@@ -129,7 +129,7 @@ final class NotchDropController {
         ShelfItemReader.read(from: sender) { items in
             guard !items.isEmpty else { return }
             if targetShelf == nil {
-                targetShelf = ShelfManager.shared.newShelf(at: nil)
+                targetShelf = ShelfManager.shared.newShelf(at: nil, focus: .afterFirstDrop)
             }
             guard let targetShelf, targetShelf.isActive else {
                 ShelfStore.shared.discard(items)
@@ -146,7 +146,7 @@ final class NotchDropController {
         operation: ShelfTransferOperation
     ) -> Bool {
         guard let sourceController = source.controller,
-              let targetShelf = ShelfManager.shared.newShelf(at: nil)
+              let targetShelf = ShelfManager.shared.newShelf(at: nil, focus: .afterFirstDrop)
         else { return false }
 
         let transferred = ShelfManager.shared.transfer(

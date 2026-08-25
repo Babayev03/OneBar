@@ -3,6 +3,17 @@ import Observation
 import Quartz
 import SwiftUI
 
+/// When a new shelf should claim the keyboard.
+enum ShelfFocusIntent {
+    /// Restored at launch. Taking focus at login would be rude.
+    case none
+    /// The user asked for this shelf and no drag is in flight.
+    case immediate
+    /// Summoned mid-drag. The drag is still in the user's hand and this is the
+    /// window it is about to be dropped on, so focus waits for the drop.
+    case afterFirstDrop
+}
+
 enum ShelfRoute {
     case items
     case customize
@@ -93,18 +104,19 @@ final class ShelfController {
     private var snapSuppressedForMove = false
     private var needsScreenReclamp = false
     private var activityTask: Task<Void, Never>?
+    private var wantsFocusAfterFirstDrop = false
 
     private static let dockAnimationDuration = 0.22
 
-    convenience init(at point: NSPoint?) {
-        self.init(snapshot: nil, at: point)
+    convenience init(at point: NSPoint?, focus: ShelfFocusIntent = .immediate) {
+        self.init(snapshot: nil, at: point, focus: focus)
     }
 
-    convenience init(snapshot: ShelfSnapshot) {
-        self.init(snapshot: snapshot, at: nil)
+    convenience init(snapshot: ShelfSnapshot, focus: ShelfFocusIntent = .none) {
+        self.init(snapshot: snapshot, at: nil, focus: focus)
     }
 
-    private init(snapshot: ShelfSnapshot?, at point: NSPoint?) {
+    private init(snapshot: ShelfSnapshot?, at point: NSPoint?, focus: ShelfFocusIntent) {
         id = snapshot?.id ?? UUID()
         if let snapshot {
             model.items = snapshot.items
@@ -159,14 +171,24 @@ final class ShelfController {
         } else {
             position(near: point)
         }
-        // Ordered front rather than made key: the shelf appears in the middle
-        // of a drag out of another app, and taking focus there would end it.
-        // The preference restores the old Dropover behaviour for anyone who
-        // wants to type at it the moment it opens.
-        if AppState.shared.shelfTakesFocus {
-            panel.makeKeyAndOrderFront(nil)
-        } else {
+        // A shelf summoned mid-drag is ordered front without focus: the drag is
+        // still in the user's hand and this is the window it is being dropped
+        // on. It claims the keyboard when the drop lands instead, which is what
+        // makes the shelf keys work without clicking it first. The preference
+        // overrides that for anyone who wants to type at it the moment it opens.
+        switch focus {
+        case .none:
             panel.orderFrontRegardless()
+        case .immediate:
+            panel.orderFrontRegardless()
+            takeFocus()
+        case .afterFirstDrop:
+            panel.orderFrontRegardless()
+            if AppState.shared.shelfTakesFocus {
+                takeFocus()
+            } else {
+                wantsFocusAfterFirstDrop = true
+            }
         }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             model.isPresented = true
@@ -176,6 +198,14 @@ final class ShelfController {
         observePosition(of: panel)
         observeScreenChanges(of: panel)
         applyCollectionBehavior()
+    }
+
+    /// Making the panel key is not enough on its own: with another app
+    /// frontmost the keys still go there, so the app is activated too.
+    private func takeFocus() {
+        guard isActive, let panel else { return }
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Keyboard
@@ -508,6 +538,13 @@ final class ShelfController {
         model.route = .items
         resize()
         persistIfPinned()
+
+        // The drag that summoned this shelf has landed, so the keyboard can be
+        // claimed now without cutting it short.
+        if wantsFocusAfterFirstDrop {
+            wantsFocusAfterFirstDrop = false
+            takeFocus()
+        }
 
         if AppState.shared.shelfAutoRetract,
            wasEmpty,

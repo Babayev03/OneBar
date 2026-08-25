@@ -179,7 +179,7 @@ struct ShelfPane: View {
                     row("Use colour to distinguish shelves", subtitle: "Gives each open shelf its own indicator colour. A shelf you colour yourself keeps the colour you picked.") {
                         Toggle("", isOn: colorLabelsBinding).toggleStyle(.switch).labelsHidden()
                     }
-                    row("Shelf takes focus when shown", subtitle: "Off by default: a shelf usually appears mid-drag, and taking focus there would end the drag that summoned it.") {
+                    row("Take focus immediately", subtitle: "A shelf summoned mid-drag normally waits for the drop before claiming the keyboard, so the drag is never cut short. Turn this on to have it take focus the moment it appears.") {
                         Toggle("", isOn: takesFocusBinding).toggleStyle(.switch).labelsHidden()
                     }
                     row("New shelves open as", subtitle: nil) {

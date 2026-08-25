@@ -244,8 +244,8 @@ final class AppState {
         didSet { UserDefaults.standard.set(shelfColorLabels, forKey: "shelfColorLabels") }
     }
 
-    /// Off by default: a shelf usually appears mid-drag, and taking focus there
-    /// would end the drag that summoned it.
+    /// A shelf summoned mid-drag waits for the drop before taking focus, so
+    /// the drag is never cut short. This overrides that.
     var shelfTakesFocus: Bool {
         didSet { UserDefaults.standard.set(shelfTakesFocus, forKey: "shelfTakesFocus") }
     }

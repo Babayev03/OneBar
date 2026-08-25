@@ -64,9 +64,12 @@ final class ShelfManager {
     // MARK: - Opening
 
     @discardableResult
-    func newShelf(at point: NSPoint?) -> ShelfController? {
+    func newShelf(
+        at point: NSPoint?,
+        focus: ShelfFocusIntent = .immediate
+    ) -> ShelfController? {
         guard AppState.shared.shelfEnabled else { return nil }
-        let controller = ShelfController(at: point)
+        let controller = ShelfController(at: point, focus: focus)
         controller.model.colorSource = .automatic
         if AppState.shared.shelfColorLabels {
             controller.model.colorName = nextColorName()
@@ -94,15 +97,18 @@ final class ShelfManager {
     func reopen(_ snapshot: ShelfSnapshot) -> ShelfController? {
         guard AppState.shared.shelfEnabled else { return nil }
         let archived = ShelfArchiveLogic.take(id: snapshot.id, pinned: &pinned, recent: &recent) ?? snapshot
-        let controller = open(archived)
+        let controller = open(archived, focus: .immediate)
         persist()
         return controller
     }
 
     @discardableResult
-    private func open(_ snapshot: ShelfSnapshot) -> ShelfController {
+    private func open(
+        _ snapshot: ShelfSnapshot,
+        focus: ShelfFocusIntent = .none
+    ) -> ShelfController {
         if let existing = shelves.first(where: { $0.id == snapshot.id }) { return existing }
-        let controller = ShelfController(snapshot: snapshot)
+        let controller = ShelfController(snapshot: snapshot, focus: focus)
         shelves.append(controller)
         if controller.model.colorSource == .automatic {
             controller.applyAutomaticColor(
