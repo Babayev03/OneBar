@@ -52,17 +52,29 @@ enum ShelfActionRunner {
             share(subject, anchoredTo: view ?? controller.anchorView)
         case .compress:
             let urls = subject.fileURLs
+            let folder = defaultFolder
             produce(in: controller, activity: "Compressing…", success: "Compressed") {
-                [try await ShelfTransforms.compress(urls)]
+                [try await ShelfTransforms.compress(urls, in: folder)]
             }
+        case .removeMetadata:
+            let urls = subject.imageURLs
+            let folder = defaultFolder
+            produce(in: controller, activity: "Stripping…", success: "Metadata removed") {
+                try await ShelfTransforms.removeMetadata(urls, in: folder)
+            }
+        case .getInfo:
+            showInfo(subject.items, from: controller)
+        case .copyPath:
+            copyPaths(subject.fileURLs)
         case .convertImage, .resizeImage:
             // Reached through the submenu, which carries the preset or opens
             // the custom panel.
             break
         case .mergePDF:
             let urls = subject.printableURLs
+            let folder = defaultFolder
             produce(in: controller, activity: "Merging…", success: "Merged to PDF") {
-                [try await ShelfTransforms.mergePDF(urls)]
+                [try await ShelfTransforms.mergePDF(urls, in: folder)]
             }
         case .moveToTrash:
             trash(subject, in: controller)
@@ -128,17 +140,56 @@ enum ShelfActionRunner {
         if !moved { HUD.show("Nothing was transferred", symbol: "tray") }
     }
 
+    // MARK: - Information
+
+    private static func showInfo(_ items: [ShelfItem], from controller: ShelfController) {
+        guard !items.isEmpty else { return }
+        ShelfDialog.shared.present(
+            title: items.count == 1 ? items[0].title : "\(items.count) items",
+            subtitle: nil,
+            width: 340,
+            near: controller.anchorView?.window
+        ) {
+            ShelfInfoView(items: items)
+        }
+    }
+
+    private static func copyPaths(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+        HUD.show(urls.count == 1 ? "Path copied" : "\(urls.count) paths copied", symbol: "link")
+    }
+
     // MARK: - Transforms
+
+    /// The folder the user last chose, if it is still there. A folder that has
+    /// been moved or unmounted falls back rather than failing every action.
+    static var defaultFolder: URL? {
+        let path = AppState.shared.shelfOutputFolder
+        guard !path.isEmpty else { return nil }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else { return nil }
+        return URL(filePath: path)
+    }
 
     /// Runs a preset straight from the menu.
     static func convertImages(_ request: ImageActionRequest, in controller: ShelfController) {
         guard !request.urls.isEmpty else { return }
-        produce(in: controller, activity: "Converting…", success: "Converted") {
+        produce(
+            in: controller,
+            activity: "Converting…",
+            success: "Converted",
+            reveal: request.reveal
+        ) {
             try await ShelfTransforms.convert(request)
         }
     }
 
-    /// Opens the custom panel rather than acting, seeded from the selection.
+    /// Opens the dialog rather than acting, seeded from the selection.
     static func customImageRequest(
         _ action: ShelfAction,
         scope: ShelfActionScope,
@@ -146,13 +197,23 @@ enum ShelfActionRunner {
     ) {
         let urls = subject(for: scope, in: controller).imageURLs
         guard !urls.isEmpty else { return }
-        controller.showImageOptions(
-            ImageActionRequest(
-                urls: urls,
-                format: .jpeg,
-                resize: action == .resizeImage ? .longestEdge(1024) : .original
-            )
+        let request = ImageActionRequest(
+            urls: urls,
+            format: action == .resizeImage ? nil : .jpeg,
+            resize: action == .resizeImage ? .longestEdge(1024) : .original,
+            folder: defaultFolder,
+            reveal: AppState.shared.shelfOutputReveal
         )
+        ShelfDialog.shared.present(
+            title: action == .resizeImage ? "Resize Image" : "Convert Image Format",
+            subtitle: action == .resizeImage
+                ? "Scale an image down to the size you choose."
+                : "Convert the format of an image to the specified format.",
+            width: 340,
+            near: controller.anchorView?.window
+        ) {
+            ShelfImageDialogView(controller: controller, action: action, request: request)
+        }
     }
 
     /// The one path for everything that writes a file: hold the shelf busy, do
@@ -162,8 +223,10 @@ enum ShelfActionRunner {
         in controller: ShelfController,
         activity: String,
         success: String,
+        reveal: ShelfOutputReveal? = nil,
         work: @escaping @Sendable () async throws -> [URL]
     ) {
+        let reveal = reveal ?? AppState.shared.shelfOutputReveal
         guard controller.beginActivity(activity) else {
             HUD.show("Already working on this shelf", symbol: "hourglass")
             return
@@ -175,12 +238,16 @@ enum ShelfActionRunner {
                     try await work()
                 }.value
                 guard controller.isActive else { return }
-                let items = produced.compactMap { ShelfItemReader.fileItem(for: $0) }
-                guard !items.isEmpty else {
+                guard !produced.isEmpty else {
                     HUD.show("Nothing was produced", symbol: "exclamationmark.triangle")
                     return
                 }
-                controller.add(items)
+                if reveal.addsToShelf {
+                    controller.add(produced.compactMap { ShelfItemReader.fileItem(for: $0) })
+                }
+                if reveal.revealsInFinder {
+                    NSWorkspace.shared.activateFileViewerSelecting(produced)
+                }
                 HUD.show(success, symbol: "checkmark.circle.fill")
             } catch {
                 guard controller.isActive else { return }

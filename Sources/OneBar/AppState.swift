@@ -279,6 +279,15 @@ final class AppState {
         didSet { UserDefaults.standard.set(shelfNotchDrop, forKey: "shelfNotchDrop") }
     }
 
+    /// Where the transform actions write. Empty means OneBar's own folder.
+    var shelfOutputFolder: String {
+        didSet { UserDefaults.standard.set(shelfOutputFolder, forKey: "shelfOutputFolder") }
+    }
+
+    var shelfOutputReveal: ShelfOutputReveal {
+        didSet { UserDefaults.standard.set(shelfOutputReveal.rawValue, forKey: "shelfOutputReveal") }
+    }
+
     var shelfNotchHighlight: NotchHighlight {
         didSet { UserDefaults.standard.set(shelfNotchHighlight.rawValue, forKey: "shelfNotchHighlight") }
     }
@@ -370,7 +379,9 @@ final class AppState {
             "shelfDoubleClick": "dock",
             "shelfKeepInSpace": false,
             "shelfNotchDrop": true,
-            "shelfNotchHighlight": "onHover"
+            "shelfNotchHighlight": "onHover",
+            "shelfOutputFolder": "",
+            "shelfOutputReveal": "shelf"
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
         clipboardEnabled = defaults.bool(forKey: "clipboardEnabled")
@@ -429,6 +440,10 @@ final class AppState {
         ) ?? .dock
         shelfKeepInSpace = defaults.bool(forKey: "shelfKeepInSpace")
         shelfNotchDrop = defaults.bool(forKey: "shelfNotchDrop")
+        shelfOutputFolder = defaults.string(forKey: "shelfOutputFolder") ?? ""
+        shelfOutputReveal = ShelfOutputReveal(
+            rawValue: defaults.string(forKey: "shelfOutputReveal") ?? ""
+        ) ?? .shelf
         shelfNotchHighlight = NotchHighlight(
             rawValue: defaults.string(forKey: "shelfNotchHighlight") ?? ""
         ) ?? .onHover

@@ -7,6 +7,10 @@ enum ImageFormat: String, Codable, CaseIterable, Identifiable {
     case png
     case heic
     case tiff
+    case avif
+    /// Not an Image I/O destination on any current macOS — the system reads
+    /// WebP and cannot write it. Offered only where `cwebp` is installed.
+    case webp
 
     var id: String { rawValue }
 
@@ -16,6 +20,8 @@ enum ImageFormat: String, Codable, CaseIterable, Identifiable {
         case .png: return "PNG"
         case .heic: return "HEIC"
         case .tiff: return "TIFF"
+        case .avif: return "AVIF"
+        case .webp: return "WebP"
         }
     }
 
@@ -25,6 +31,8 @@ enum ImageFormat: String, Codable, CaseIterable, Identifiable {
         case .png: return .png
         case .heic: return .heic
         case .tiff: return .tiff
+        case .avif: return .init("public.avif") ?? .png
+        case .webp: return .init("org.webmproject.webp") ?? .png
         }
     }
 
@@ -34,12 +42,24 @@ enum ImageFormat: String, Codable, CaseIterable, Identifiable {
         case .png: return "png"
         case .heic: return "heic"
         case .tiff: return "tiff"
+        case .avif: return "avif"
+        case .webp: return "webp"
         }
     }
 
     /// PNG and TIFF are lossless, so a quality slider there would be a control
     /// that does nothing.
-    var supportsQuality: Bool { self == .jpeg || self == .heic }
+    var supportsQuality: Bool { self != .png && self != .tiff }
+
+    /// WebP goes through `cwebp`, everything else through Image I/O.
+    var needsExternalEncoder: Bool { self == .webp }
+
+    /// What the menus offer. WebP disappears rather than failing where the
+    /// encoder is missing — an option that always errors is worse than no
+    /// option at all.
+    static var available: [ImageFormat] {
+        allCases.filter { !$0.needsExternalEncoder || WebPEncoder.isAvailable }
+    }
 
     /// The format a file already is, where that is one we can write back.
     static func matching(_ type: UTType) -> ImageFormat? {
@@ -82,6 +102,26 @@ enum ImageResize: Equatable, Hashable {
     }
 }
 
+/// Where the result of an action is put once it exists.
+enum ShelfOutputReveal: String, Codable, CaseIterable, Identifiable {
+    case shelf
+    case finder
+    case both
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .shelf: return "Shelf"
+        case .finder: return "Finder"
+        case .both: return "Shelf and Finder"
+        }
+    }
+
+    var addsToShelf: Bool { self != .finder }
+    var revealsInFinder: Bool { self != .shelf }
+}
+
 /// One image conversion, whether it came from a preset or the custom panel.
 struct ImageActionRequest: Equatable {
     var urls: [URL]
@@ -92,6 +132,9 @@ struct ImageActionRequest: Equatable {
     var resize: ImageResize
     /// Ignored for the lossless formats.
     var quality: Double
+    /// `nil` writes to OneBar's own `action-output` folder.
+    var folder: URL?
+    var reveal: ShelfOutputReveal
 
     /// The quality slider is shown unless the format is known to be lossless.
     var showsQuality: Bool { format?.supportsQuality ?? true }
@@ -100,12 +143,16 @@ struct ImageActionRequest: Equatable {
         urls: [URL],
         format: ImageFormat? = nil,
         resize: ImageResize = .original,
-        quality: Double = 0.8
+        quality: Double = 0.8,
+        folder: URL? = nil,
+        reveal: ShelfOutputReveal = .shelf
     ) {
         self.urls = urls
         self.format = format
         self.resize = resize
         self.quality = quality
+        self.folder = folder
+        self.reveal = reveal
     }
 }
 

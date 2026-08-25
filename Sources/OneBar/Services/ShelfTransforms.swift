@@ -8,13 +8,15 @@ enum ShelfTransformError: LocalizedError {
     case unreadable(URL)
     case writeFailed
     case toolFailed(Int32)
+    case noWebPEncoder
 
     var errorDescription: String? {
         switch self {
         case .noOutputLocation: return "Could not create the output folder"
         case .unreadable(let url): return "Could not read \(url.lastPathComponent)"
         case .writeFailed: return "Could not write the result"
-        case .toolFailed: return "Compression failed"
+        case .toolFailed: return "The command-line tool failed"
+        case .noWebPEncoder: return "WebP needs cwebp, which is not installed"
         }
     }
 }
@@ -27,13 +29,17 @@ enum ShelfTransformError: LocalizedError {
 enum ShelfTransforms {
     // MARK: - Compress
 
-    static func compress(_ urls: [URL], store: ShelfStore = .shared) async throws -> URL {
+    static func compress(
+        _ urls: [URL],
+        in folder: URL? = nil,
+        store: ShelfStore = .shared
+    ) async throws -> URL {
         guard let first = urls.first else { throw ShelfTransformError.unreadable(URL(filePath: "/")) }
 
         // Finder's naming: one item keeps its whole name and gains .zip, a
         // group becomes Archive.zip.
         let base = urls.count == 1 ? first.lastPathComponent : "Archive"
-        guard let destination = store.outputURL(base: base, extension: "zip") else {
+        guard let destination = store.outputURL(base: base, extension: "zip", in: folder) else {
             throw ShelfTransformError.noOutputLocation
         }
 
@@ -67,8 +73,8 @@ enum ShelfTransforms {
         }
         defer { if let staging { try? FileManager.default.removeItem(at: staging) } }
 
-        let status = try await run(
-            "/usr/bin/ditto",
+        let status = try await runTool(
+            URL(filePath: "/usr/bin/ditto"),
             ["-c", "-k", "--sequesterRsrc", "--keepParent", source.path, destination.path]
         )
         guard status == 0 else {
@@ -80,9 +86,9 @@ enum ShelfTransforms {
 
     /// A still-running deallocated `Process` crashes the app, so the process is
     /// held for the whole wait — the same rule `ScreenCaptureService` follows.
-    private static func run(_ launchPath: String, _ arguments: [String]) async throws -> Int32 {
+    static func runTool(_ tool: URL, _ arguments: [String]) async throws -> Int32 {
         let process = Process()
-        process.executableURL = URL(filePath: launchPath)
+        process.executableURL = tool
         process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -150,9 +156,36 @@ enum ShelfTransforms {
         let base = ShelfOutputNaming.imageOutputBase(for: url, longestEdge: edge, resized: resized)
         guard let destination = store.outputURL(
             base: base,
-            extension: format.fileExtension
+            extension: format.fileExtension,
+            in: request.folder
         ) else { throw ShelfTransformError.noOutputLocation }
 
+        if format.needsExternalEncoder {
+            // cwebp cannot read a CGImage, so the already-resized and
+            // already-rotated pixels go to a lossless PNG first. Encoding the
+            // original instead would throw away the work above.
+            let intermediate = FileManager.default.temporaryDirectory
+                .appendingPathComponent("OneBarWebP-\(UUID().uuidString).png")
+            defer { try? FileManager.default.removeItem(at: intermediate) }
+            try write(image, to: intermediate, as: .png, quality: 1)
+            try await WebPEncoder.encode(
+                source: intermediate,
+                to: destination,
+                quality: request.quality
+            )
+            return destination
+        }
+
+        try write(image, to: destination, as: format, quality: request.quality)
+        return destination
+    }
+
+    private static func write(
+        _ image: CGImage,
+        to destination: URL,
+        as format: ImageFormat,
+        quality: Double
+    ) throws {
         guard let writer = CGImageDestinationCreateWithURL(
             destination as CFURL,
             format.utType.identifier as CFString,
@@ -162,14 +195,13 @@ enum ShelfTransforms {
 
         var settings: [CFString: Any] = [:]
         if format.supportsQuality {
-            settings[kCGImageDestinationLossyCompressionQuality] = request.quality
+            settings[kCGImageDestinationLossyCompressionQuality] = quality
         }
         CGImageDestinationAddImage(writer, image, settings as CFDictionary)
         guard CGImageDestinationFinalize(writer) else {
             try? FileManager.default.removeItem(at: destination)
             throw ShelfTransformError.writeFailed
         }
-        return destination
     }
 
     private static func sourceFormat(of source: CGImageSource) -> ImageFormat? {
@@ -179,9 +211,69 @@ enum ShelfTransforms {
         return ImageFormat.matching(type)
     }
 
+    // MARK: - Metadata
+
+    /// Strips the tags that say where a photo was taken and on what.
+    ///
+    /// Written with `AddImageFromSource` rather than a decode and re-encode, so
+    /// a JPEG keeps its exact pixels — stripping metadata must not cost a
+    /// generation of quality.
+    ///
+    /// The result is not EXIF-free and cannot be: Image I/O writes back a
+    /// structural block of `ColorSpace`, `PixelXDimension` and
+    /// `PixelYDimension` whatever it is handed. Those describe the image, not
+    /// the photographer, and their presence is not a sign this failed.
+    static func removeMetadata(
+        _ urls: [URL],
+        in folder: URL? = nil,
+        store: ShelfStore = .shared
+    ) async throws -> [URL] {
+        var written: [URL] = []
+        for url in urls {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  CGImageSourceGetCount(source) > 0,
+                  let identifier = CGImageSourceGetType(source)
+            else { continue }
+
+            let base = url.deletingPathExtension().lastPathComponent
+            guard let destination = store.outputURL(
+                base: base,
+                extension: url.pathExtension,
+                in: folder
+            ) else { throw ShelfTransformError.noOutputLocation }
+
+            guard let writer = CGImageDestinationCreateWithURL(
+                destination as CFURL, identifier, 1, nil
+            ) else { throw ShelfTransformError.writeFailed }
+
+            // The TIFF dictionary is deliberately kept: it carries orientation
+            // and resolution, and dropping it turns a sideways photo sideways.
+            // Everything below is camera, timestamp and location.
+            let stripped: [CFString: Any] = [
+                kCGImagePropertyExifDictionary: kCFNull as Any,
+                kCGImagePropertyExifAuxDictionary: kCFNull as Any,
+                kCGImagePropertyGPSDictionary: kCFNull as Any,
+                kCGImagePropertyIPTCDictionary: kCFNull as Any,
+                kCGImagePropertyMakerAppleDictionary: kCFNull as Any,
+            ]
+            CGImageDestinationAddImageFromSource(writer, source, 0, stripped as CFDictionary)
+            guard CGImageDestinationFinalize(writer) else {
+                try? FileManager.default.removeItem(at: destination)
+                throw ShelfTransformError.writeFailed
+            }
+            written.append(destination)
+        }
+        guard !written.isEmpty else { throw ShelfTransformError.writeFailed }
+        return written
+    }
+
     // MARK: - PDF
 
-    static func mergePDF(_ urls: [URL], store: ShelfStore = .shared) async throws -> URL {
+    static func mergePDF(
+        _ urls: [URL],
+        in folder: URL? = nil,
+        store: ShelfStore = .shared
+    ) async throws -> URL {
         let merged = PDFDocument()
         for url in urls {
             if let document = PDFDocument(url: url) {
@@ -198,7 +290,7 @@ enum ShelfTransforms {
         let base = urls.count == 1
             ? urls[0].deletingPathExtension().lastPathComponent
             : "Merged"
-        guard let destination = store.outputURL(base: base, extension: "pdf")
+        guard let destination = store.outputURL(base: base, extension: "pdf", in: folder)
         else { throw ShelfTransformError.noOutputLocation }
         guard merged.write(to: destination) else { throw ShelfTransformError.writeFailed }
         return destination

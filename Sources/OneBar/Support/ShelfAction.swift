@@ -17,7 +17,10 @@ enum ShelfAction: String, CaseIterable, Identifiable {
     case compress
     case convertImage
     case resizeImage
+    case removeMetadata
     case mergePDF
+    case getInfo
+    case copyPath
     case moveToTrash
     case removeFromShelf
     case clearShelf
@@ -39,7 +42,10 @@ enum ShelfAction: String, CaseIterable, Identifiable {
         case .compress: return "Compress"
         case .convertImage: return "Convert Image"
         case .resizeImage: return "Resize Image"
+        case .removeMetadata: return "Remove Metadata"
         case .mergePDF: return "Merge to PDF"
+        case .getInfo: return "Get Info"
+        case .copyPath: return "Copy Path"
         case .moveToTrash: return "Move to Trash"
         case .removeFromShelf: return "Remove From Shelf"
         case .clearShelf: return "Clear Shelf"
@@ -61,7 +67,10 @@ enum ShelfAction: String, CaseIterable, Identifiable {
         case .compress: return "archivebox"
         case .convertImage: return "photo.on.rectangle.angled"
         case .resizeImage: return "aspectratio"
+        case .removeMetadata: return "eye.slash"
         case .mergePDF: return "doc.on.doc.fill"
+        case .getInfo: return "info.circle"
+        case .copyPath: return "link"
         case .moveToTrash: return "trash"
         case .removeFromShelf: return "minus.circle"
         case .clearShelf: return "xmark.bin"
@@ -71,11 +80,11 @@ enum ShelfAction: String, CaseIterable, Identifiable {
     /// Menu order, one inner array per divider-separated group.
     static let groups: [[ShelfAction]] = [
         [.open, .openWith, .quickLook],
-        [.showInFinder, .rename],
+        [.getInfo, .showInFinder, .rename, .copyPath],
         [.copy, .addFromClipboard],
         [.moveToNewShelf, .copyToNewShelf],
         [.share],
-        [.compress, .convertImage, .resizeImage, .mergePDF],
+        [.compress, .convertImage, .resizeImage, .removeMetadata, .mergePDF],
         [.moveToTrash, .removeFromShelf, .clearShelf],
     ]
 
@@ -91,7 +100,9 @@ enum ShelfAction: String, CaseIterable, Identifiable {
         case .addFromClipboard: return true
         case .share: return subject.hasShareableContent
         case .compress: return !subject.fileURLs.isEmpty
-        case .convertImage, .resizeImage: return !subject.imageURLs.isEmpty
+        case .convertImage, .resizeImage, .removeMetadata: return !subject.imageURLs.isEmpty
+        case .getInfo: return !subject.items.isEmpty
+        case .copyPath: return !subject.fileURLs.isEmpty
         // One document merged into a PDF is the document. Two or more is the
         // feature.
         case .mergePDF: return subject.printableURLs.count > 1

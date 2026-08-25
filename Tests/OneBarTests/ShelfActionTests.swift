@@ -54,7 +54,9 @@ struct ShelfActionTests {
             shelfItemCount: 1
         )
         // A lone text file is not an image and cannot be merged with itself.
-        let inapplicable: Set<ShelfAction> = [.convertImage, .resizeImage, .mergePDF]
+        let inapplicable: Set<ShelfAction> = [
+            .convertImage, .resizeImage, .removeMetadata, .mergePDF,
+        ]
         for action in ShelfAction.allCases {
             #expect(
                 action.isAvailable(for: subject) == !inapplicable.contains(action),

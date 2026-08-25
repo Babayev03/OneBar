@@ -193,16 +193,19 @@ final class ShelfStore {
 
     /// A free name inside `action-output`, creating the directory on first use
     /// so an unused install never carries an empty folder.
-    func outputURL(base: String, extension ext: String) -> URL? {
+    func outputURL(base: String, extension ext: String, in folder: URL? = nil) -> URL? {
+        let directory = folder ?? outputDirectory
         guard (try? FileManager.default.createDirectory(
-            at: outputDirectory, withIntermediateDirectories: true
+            at: directory, withIntermediateDirectories: true
         )) != nil else { return nil }
+        // Writing into a folder the user chose must never overwrite what is
+        // already in it, which is the whole reason names are made unique.
         let name = ShelfOutputNaming.unique(base: base, extension: ext) { candidate in
             FileManager.default.fileExists(
-                atPath: outputDirectory.appendingPathComponent(candidate).path
+                atPath: directory.appendingPathComponent(candidate).path
             )
         }
-        return outputDirectory.appendingPathComponent(name)
+        return directory.appendingPathComponent(name)
     }
 
     func fileSize(of url: URL) -> Int? {

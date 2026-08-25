@@ -246,6 +246,84 @@ struct ShelfTransformTests {
         #expect(document.pageCount == 3)
     }
 
+    // MARK: - Metadata
+
+    @Test("Stripping metadata drops the camera and location tags and keeps the pixels")
+    func removeMetadata() async throws {
+        let directory = try sandbox()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ShelfStore(baseDirectory: directory)
+
+        // A JPEG carrying EXIF and GPS, written the way a camera would.
+        let source = directory.appendingPathComponent("trip.jpg")
+        let context = CGContext(
+            data: nil, width: 120, height: 80, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )!
+        context.setFillColor(CGColor(red: 1, green: 0.4, blue: 0.1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 120, height: 80))
+        let writer = CGImageDestinationCreateWithURL(
+            source as CFURL, UTType.jpeg.identifier as CFString, 1, nil
+        )!
+        let tags: [CFString: Any] = [
+            kCGImagePropertyExifDictionary: [kCGImagePropertyExifUserComment: "secret"],
+            kCGImagePropertyGPSDictionary: [
+                kCGImagePropertyGPSLatitude: 51.5,
+                kCGImagePropertyGPSLongitude: 0.12,
+            ],
+        ]
+        CGImageDestinationAddImage(writer, context.makeImage()!, tags as CFDictionary)
+        #expect(CGImageDestinationFinalize(writer))
+
+        func properties(_ url: URL) -> [CFString: Any] {
+            let image = CGImageSourceCreateWithURL(url as CFURL, nil)!
+            return CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as! [CFString: Any]
+        }
+        #expect(properties(source)[kCGImagePropertyGPSDictionary] != nil)
+
+        let outputs = try await ShelfTransforms.removeMetadata([source], store: store)
+        let output = try #require(outputs.first)
+        let after = properties(output)
+        #expect(after[kCGImagePropertyGPSDictionary] == nil)
+        // Image I/O always writes back a structural EXIF block, so the check is
+        // that nothing identifying survived — not that EXIF is absent.
+        let exif = (after[kCGImagePropertyExifDictionary] as? [CFString: Any]) ?? [:]
+        #expect(exif[kCGImagePropertyExifUserComment] == nil)
+        #expect(Set(exif.keys.map { $0 as String }) == [
+            "ColorSpace", "PixelXDimension", "PixelYDimension",
+        ])
+        // The image itself must survive intact.
+        #expect(pixelSize(of: output) == CGSize(width: 120, height: 80))
+        // …and the original keeps its tags.
+        #expect(properties(source)[kCGImagePropertyGPSDictionary] != nil)
+    }
+
+    @Test("An explicit folder is where the output lands")
+    func explicitOutputFolder() async throws {
+        let directory = try sandbox()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ShelfStore(baseDirectory: directory)
+
+        let chosen = directory.appendingPathComponent("Chosen", isDirectory: true)
+        let source = directory.appendingPathComponent("thing.txt")
+        try Data("x".utf8).write(to: source)
+
+        let archive = try await ShelfTransforms.compress([source], in: chosen, store: store)
+        #expect(archive.deletingLastPathComponent().standardizedFileURL == chosen.standardizedFileURL)
+        #expect(!FileManager.default.fileExists(atPath: store.outputDirectory.path))
+    }
+
+    @Test("WebP is only offered where its encoder exists")
+    func webPAvailability() {
+        #expect(ImageFormat.available.contains(.avif))
+        #expect(ImageFormat.available.contains(.webp) == WebPEncoder.isAvailable)
+        // Every other format is always writable by Image I/O.
+        for format in ImageFormat.allCases where format != .webp {
+            #expect(ImageFormat.available.contains(format))
+        }
+    }
+
     // MARK: - Availability
 
     @Test("The image actions are offered for images and merging needs two")

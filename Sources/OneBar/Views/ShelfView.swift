@@ -22,8 +22,6 @@ struct ShelfView: View {
                 }
             case .customize:
                 ShelfCustomizeView(controller: controller)
-            case .imageOptions:
-                ShelfImageOptionsView(controller: controller)
             }
         }
         .opacity(showsDockHandle ? 0 : 1)

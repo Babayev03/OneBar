@@ -72,6 +72,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case shelfOpen
     case shelfShowInFinder
     case shelfRename
+    case shelfGetInfo
 
     var id: String { rawValue }
 
@@ -104,6 +105,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .shelfOpen: return "Open selection"
         case .shelfShowInFinder: return "Show in Finder"
         case .shelfRename: return "Rename"
+        case .shelfGetInfo: return "Get Info"
         }
     }
 
@@ -131,11 +133,12 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .shelfDock: return KeyBinding(keyCode: 2, modifiers: [.command])    // ⌘D
         case .shelfDockLeft: return KeyBinding(keyCode: 123, modifiers: [.command, .option]) // ⌥⌘←
         case .shelfDockRight: return KeyBinding(keyCode: 124, modifiers: [.command, .option]) // ⌥⌘→
-        case .shelfCustomize: return KeyBinding(keyCode: 34, modifiers: [.command]) // ⌘I
+        case .shelfCustomize: return KeyBinding(keyCode: 34, modifiers: [.command, .shift]) // ⇧⌘I
         case .shelfNewFromClipboard: return KeyBinding(keyCode: 45, modifiers: [.command]) // ⌘N
         case .shelfOpen: return KeyBinding(keyCode: 31, modifiers: [.command])   // ⌘O
         case .shelfShowInFinder: return KeyBinding(keyCode: 15, modifiers: [.command]) // ⌘R
         case .shelfRename: return KeyBinding(keyCode: 36)                        // Return
+        case .shelfGetInfo: return KeyBinding(keyCode: 34)                       // I
         }
     }
 

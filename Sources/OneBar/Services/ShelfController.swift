@@ -6,7 +6,6 @@ import SwiftUI
 enum ShelfRoute {
     case items
     case customize
-    case imageOptions
 }
 
 @MainActor
@@ -21,8 +20,6 @@ final class ShelfModel {
     var route: ShelfRoute = .items
     /// The item whose name is being edited in place, if any.
     var renamingItemID: UUID?
-    /// What the custom image panel is editing.
-    var imageRequest: ImageActionRequest?
     /// Set while an action that writes a file is running, so the footer can say
     /// so. One at a time per shelf — a second zip started over the first would
     /// race for the same output name.
@@ -186,9 +183,24 @@ final class ShelfController {
     /// dragging. A click on a collapsed tab is consumed so it cannot expand the
     /// shelf and also activate a control that moved underneath the pointer.
     private func installClickMonitor() {
-        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) {
+        clickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseUp, .rightMouseDown]
+        ) {
             [weak self] event in
             guard let self else { return event }
+
+            // A right-click is an interaction like any other, so it commits a
+            // peek. Without this the menu opens and the hover watch — which
+            // sees the pointer move onto the menu, outside the shelf — slides
+            // the shelf back under it. Committing keeps the peeked frame
+            // exactly where it is, so nothing moves out from under the menu.
+            if event.type == .rightMouseDown {
+                if let panel = self.panel, event.window === panel {
+                    self.cancelFrameAnimation()
+                    self.commitPeekForInteraction()
+                }
+                return event
+            }
 
             if event.type == .leftMouseUp {
                 if self.userMoveCandidate || self.isUserMoving {
@@ -249,7 +261,7 @@ final class ShelfController {
             // which cancels the rename. This monitor sees the key first, so it
             // has to decline it rather than close the shelf out from under it.
             if model.renamingItemID != nil { return false }
-            if model.route == .customize || model.route == .imageOptions { showItems() }
+            if model.route == .customize { showItems() }
             else if model.collapse != nil { expand() }
             else { close() }
             return true
@@ -295,6 +307,10 @@ final class ShelfController {
         }
         if matches(.shelfRename) {
             ShelfActionRunner.perform(.rename, scope: .selection, in: self)
+            return true
+        }
+        if matches(.shelfGetInfo) {
+            ShelfActionRunner.perform(.getInfo, scope: .selection, in: self)
             return true
         }
         return false
@@ -719,19 +735,7 @@ final class ShelfController {
 
     func showItems() {
         model.route = .items
-        model.imageRequest = nil
         resize()
-    }
-
-    /// The custom half of the image actions. Focus is taken because the panel
-    /// has a field to type a size into, exactly as Customize does.
-    func showImageOptions(_ request: ImageActionRequest) {
-        guard !request.urls.isEmpty else { return }
-        model.imageRequest = request
-        model.route = .imageOptions
-        resize()
-        panel?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Long-running actions
@@ -1377,7 +1381,6 @@ final class ShelfController {
 
     private func desiredHeight() -> CGFloat {
         if model.route == .customize { return Self.headerHeight + 216 }
-        if model.route == .imageOptions { return Self.headerHeight + 208 }
         guard !model.items.isEmpty else {
             // The restore button only appears when there is something to
             // restore, and it needs the room.
