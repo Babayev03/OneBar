@@ -12,7 +12,6 @@ struct ShelfCommandBarView: View {
 
     @State private var query = ""
     @State private var selection = 0
-    @FocusState private var fieldFocused: Bool
 
     private var results: [ShelfCommand] {
         ShelfCommandSearch.rank(commands, query: query)
@@ -24,12 +23,15 @@ struct ShelfCommandBarView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                TextField("Run an action…", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .focused($fieldFocused)
-                    .onSubmit { run() }
-                    .onChange(of: query) { selection = 0 }
+                ShelfSearchField(
+                    text: $query,
+                    placeholder: "Run an action…",
+                    onMove: move,
+                    onRun: run,
+                    onCancel: { ShelfDialog.shared.dismiss() }
+                )
+                .frame(height: 20)
+                .onChange(of: query) { selection = 0 }
             }
             .padding(.horizontal, 14)
             .frame(height: 42)
@@ -72,8 +74,6 @@ struct ShelfCommandBarView: View {
                     .frame(height: 40)
             }
         }
-        .onAppear { fieldFocused = true }
-        .background { KeyCatcher(onMove: move, onRun: run) }
     }
 
     private func row(_ command: ShelfCommand, isSelected: Bool) -> some View {
@@ -116,55 +116,83 @@ struct ShelfCommandBarView: View {
     }
 }
 
-/// Arrows and Return belong to the list, not to the field editor, which would
-/// otherwise move the caret and do nothing useful.
-private struct KeyCatcher: NSViewRepresentable {
+/// The search field, in AppKit.
+///
+/// SwiftUI's `TextField` cannot do either half of this: `@FocusState` does not
+/// take in a borderless panel that is made key after the first layout pass, and
+/// the arrows never reach the view because the field editor keeps them for
+/// moving the caret. The field editor reports both through `doCommandBy`.
+private struct ShelfSearchField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
     let onMove: (Int) -> Void
     let onRun: () -> Void
+    let onCancel: () -> Void
 
-    func makeNSView(context: Context) -> NSView {
-        context.coordinator.install(onMove: onMove, onRun: onRun)
-        return NSView()
-    }
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField(string: text)
+        field.delegate = context.coordinator
+        field.placeholderString = placeholder
+        field.font = .systemFont(ofSize: 14)
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.usesSingleLineMode = true
+        field.cell?.isScrollable = true
 
-    func updateNSView(_ view: NSView, context: Context) {
-        context.coordinator.install(onMove: onMove, onRun: onRun)
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
-        coordinator.remove()
-    }
-
-    @MainActor
-    final class Coordinator {
-        private var monitor: Any?
-        private var onMove: ((Int) -> Void)?
-        private var onRun: (() -> Void)?
-
-        func install(onMove: @escaping (Int) -> Void, onRun: @escaping () -> Void) {
-            self.onMove = onMove
-            self.onRun = onRun
-            guard monitor == nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self else { return event }
-                switch event.keyCode {
-                case 126: self.onMove?(-1); return nil
-                case 125: self.onMove?(1); return nil
-                case 36, 76: self.onRun?(); return nil
-                default: return event
+        // The window is made key only once its height is known, so asking for
+        // first responder now would be asking a window that cannot give it.
+        Task { @MainActor in
+            for _ in 0..<40 {
+                if let window = field.window, window.isKeyWindow {
+                    window.makeFirstResponder(field)
+                    return
                 }
+                try? await Task.sleep(for: .milliseconds(25))
             }
         }
+        return field
+    }
 
-        func remove() {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.parent = self
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: ShelfSearchField
+
+        init(_ parent: ShelfSearchField) { self.parent = parent }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            parent.text = field.stringValue
         }
 
-        deinit {
-            if let monitor { NSEvent.removeMonitor(monitor) }
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy selector: Selector
+        ) -> Bool {
+            switch selector {
+            case #selector(NSResponder.moveUp(_:)):
+                parent.onMove(-1)
+                return true
+            case #selector(NSResponder.moveDown(_:)):
+                parent.onMove(1)
+                return true
+            case #selector(NSResponder.insertNewline(_:)):
+                parent.onRun()
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                parent.onCancel()
+                return true
+            default:
+                return false
+            }
         }
     }
 }

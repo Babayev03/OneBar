@@ -278,17 +278,23 @@ enum ShelfActionRunner {
         work: @escaping @Sendable () async throws -> [URL]
     ) {
         let reveal = reveal ?? AppState.shared.shelfOutputReveal
-        guard controller.beginActivity(activity) else {
-            HUD.show("Already working on this shelf", symbol: "hourglass")
+        switch controller.beginActivity(activity) {
+        case .started:
+            break
+        case .busy:
+            HUD.show("Still working on the last action", symbol: "hourglass")
+            return
+        case .gone:
+            HUD.show("That shelf has closed", symbol: "tray")
             return
         }
-        Task { @MainActor in
+        let task = Task { @MainActor in
             defer { controller.endActivity() }
             do {
                 let produced = try await Task.detached(priority: .userInitiated) {
                     try await work()
                 }.value
-                guard controller.isActive else { return }
+                guard controller.isActive, !Task.isCancelled else { return }
                 guard !produced.isEmpty else {
                     HUD.show("Nothing was produced", symbol: "exclamationmark.triangle")
                     return
@@ -301,13 +307,14 @@ enum ShelfActionRunner {
                 }
                 HUD.show(success, symbol: "checkmark.circle.fill")
             } catch {
-                guard controller.isActive else { return }
+                guard controller.isActive, !Task.isCancelled else { return }
                 HUD.show(
                     (error as? ShelfTransformError)?.errorDescription ?? "The action failed",
                     symbol: "exclamationmark.triangle"
                 )
             }
         }
+        controller.registerActivity(task)
     }
 
     // MARK: - Sharing

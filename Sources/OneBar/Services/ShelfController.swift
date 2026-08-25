@@ -92,6 +92,7 @@ final class ShelfController {
     private var isUserMoving = false
     private var snapSuppressedForMove = false
     private var needsScreenReclamp = false
+    private var activityTask: Task<Void, Never>?
 
     private static let dockAnimationDuration = 0.22
 
@@ -632,6 +633,8 @@ final class ShelfController {
     /// whether the items are kept, so nothing is deleted here.
     func tearDown() {
         isActive = false
+        activityTask?.cancel()
+        activityTask = nil
         autoRetractTask?.cancel()
         autoRetractTask = nil
         peekTask?.cancel()
@@ -744,15 +747,37 @@ final class ShelfController {
 
     // MARK: - Long-running actions
 
-    /// Refuses a second one while the first is still going.
-    func beginActivity(_ label: String) -> Bool {
-        guard isActive, model.activity == nil else { return false }
+    enum ActivityStart {
+        case started
+        case busy
+        /// The shelf this was asked of has since closed.
+        case gone
+    }
+
+    /// One at a time, since two runs would race for the same output name.
+    func beginActivity(_ label: String) -> ActivityStart {
+        guard isActive else { return .gone }
+        guard model.activity == nil else { return .busy }
         model.activity = label
-        return true
+        return .started
+    }
+
+    /// Held so a run that never finishes can still be got rid of — a flag with
+    /// no way out would lock every later action on this shelf out for good.
+    func registerActivity(_ task: Task<Void, Never>) {
+        activityTask = task
     }
 
     func endActivity() {
         model.activity = nil
+        activityTask = nil
+    }
+
+    func cancelActivity() {
+        activityTask?.cancel()
+        activityTask = nil
+        model.activity = nil
+        HUD.show("Stopped", symbol: "stop.circle")
     }
 
     /// Pulls the items from the last shelf that was closed into this one — the

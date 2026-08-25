@@ -269,6 +269,13 @@ struct ShelfView: View {
                     .scaleEffect(0.7)
                     .frame(width: 12, height: 12)
                 Text(activity)
+                Button { controller.cancelActivity() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Stop")
             } else if model.selection.isEmpty {
                 Text(model.items.count == 1 ? "1 item" : "\(model.items.count) items")
                 if model.totalSize > 0 {
