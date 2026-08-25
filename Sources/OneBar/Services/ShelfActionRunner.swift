@@ -140,6 +140,57 @@ enum ShelfActionRunner {
         if !moved { HUD.show("Nothing was transferred", symbol: "tray") }
     }
 
+    // MARK: - Command bar
+
+    static func showCommandBar(in controller: ShelfController) {
+        let subject = subject(for: .selection, in: controller)
+        let commands = ShelfCommandSearch.commands(for: subject)
+        guard !commands.isEmpty else { return }
+        ShelfDialog.shared.present(
+            title: nil,
+            subtitle: nil,
+            width: 380,
+            near: controller.anchorView?.window
+        ) {
+            ShelfCommandBarView(controller: controller, commands: commands)
+        }
+    }
+
+    /// A chosen row. Presets act immediately; the two actions that own a
+    /// submenu open their dialog, since a flat list cannot nest.
+    static func run(_ command: ShelfCommand, in controller: ShelfController) {
+        switch command.kind {
+        case .action(let action):
+            if action == .convertImage || action == .resizeImage {
+                customImageRequest(action, scope: .selection, in: controller)
+            } else {
+                perform(action, scope: .selection, in: controller)
+            }
+        case .convert(let format):
+            let urls = subject(for: .selection, in: controller).imageURLs
+            convertImages(
+                ImageActionRequest(
+                    urls: urls,
+                    format: format,
+                    folder: defaultFolder,
+                    reveal: AppState.shared.shelfOutputReveal
+                ),
+                in: controller
+            )
+        case .resize(let resize):
+            let urls = subject(for: .selection, in: controller).imageURLs
+            convertImages(
+                ImageActionRequest(
+                    urls: urls,
+                    resize: resize,
+                    folder: defaultFolder,
+                    reveal: AppState.shared.shelfOutputReveal
+                ),
+                in: controller
+            )
+        }
+    }
+
     // MARK: - Information
 
     private static func showInfo(_ items: [ShelfItem], from controller: ShelfController) {

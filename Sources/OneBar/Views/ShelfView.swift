@@ -108,6 +108,10 @@ struct ShelfView: View {
 
     private var overflowMenu: some View {
         Menu {
+            Button("Run an Action…") { ShelfActionRunner.showCommandBar(in: controller) }
+                .keyboardShortcut("k")
+                .disabled(model.items.isEmpty)
+
             Menu("Item Actions") {
                 ShelfActionMenuItems(controller: controller, scope: .selection)
             }

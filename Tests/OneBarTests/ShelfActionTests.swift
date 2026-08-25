@@ -155,3 +155,81 @@ struct ShelfActionTests {
         #expect(listed.count == ShelfAction.allCases.count)
     }
 }
+
+@Suite("Shelf command bar")
+struct ShelfCommandTests {
+    private func imageSubject() throws -> ShelfActionSubject {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shelf-command-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("shot.png")
+        let context = CGContext(
+            data: nil, width: 10, height: 10, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, "public.png" as CFString, 1, nil
+        )!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        _ = CGImageDestinationFinalize(destination)
+        return ShelfActionSubject(
+            items: [ShelfItem(kind: .image, path: url.path, title: "shot.png")],
+            shelfItemCount: 1
+        )
+    }
+
+    @Test("Only what is currently possible is listed")
+    func listsAvailableOnly() {
+        let empty = ShelfActionSubject(items: [], shelfItemCount: 0)
+        let kinds = ShelfCommandSearch.commands(for: empty).map(\.kind)
+        #expect(kinds == [.action(.addFromClipboard)])
+    }
+
+    @Test("Presets are rows of their own")
+    func presetsAreRows() throws {
+        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        #expect(commands.contains { $0.kind == .convert(.png) })
+        #expect(commands.contains { $0.kind == .resize(.percent(50)) })
+        // The action itself is still there, to reach the custom dialog.
+        #expect(commands.contains { $0.kind == .action(.convertImage) })
+    }
+
+    @Test("A format name finds its own conversion, not the submenu")
+    func formatQuery() throws {
+        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        let top = ShelfCommandSearch.rank(commands, query: "png").first
+        #expect(top?.kind == .convert(.png))
+    }
+
+    @Test("Synonyms reach actions whose titles do not contain them")
+    func synonyms() throws {
+        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        func top(_ query: String) -> ShelfCommandKind? {
+            ShelfCommandSearch.rank(commands, query: query).first?.kind
+        }
+        #expect(top("zip") == .action(.compress))
+        #expect(top("delete") == .action(.moveToTrash))
+        #expect(top("exif") == .action(.getInfo))
+        #expect(top("reveal") == .action(.showInFinder))
+    }
+
+    @Test("A word anywhere in the title matches, and menu order breaks ties")
+    func wordMatching() throws {
+        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        let trash = ShelfCommandSearch.rank(commands, query: "trash")
+        #expect(trash.first?.kind == .action(.moveToTrash))
+
+        let copy = ShelfCommandSearch.rank(commands, query: "copy")
+        // Copy Path comes before Copy to New Shelf because the menu lists it first.
+        #expect(copy.first?.kind == .action(.copyPath))
+    }
+
+    @Test("An unmatched query returns nothing rather than everything")
+    func noMatch() throws {
+        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        #expect(ShelfCommandSearch.rank(commands, query: "xyzzy").isEmpty)
+        // An empty query is not a filter.
+        #expect(ShelfCommandSearch.rank(commands, query: "   ").count == commands.count)
+    }
+}

@@ -73,6 +73,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case shelfShowInFinder
     case shelfRename
     case shelfGetInfo
+    case shelfCommandBar
 
     var id: String { rawValue }
 
@@ -106,6 +107,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .shelfShowInFinder: return "Show in Finder"
         case .shelfRename: return "Rename"
         case .shelfGetInfo: return "Get Info"
+        case .shelfCommandBar: return "Run an action…"
         }
     }
 
@@ -139,6 +141,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .shelfShowInFinder: return KeyBinding(keyCode: 15, modifiers: [.command]) // ⌘R
         case .shelfRename: return KeyBinding(keyCode: 36)                        // Return
         case .shelfGetInfo: return KeyBinding(keyCode: 34, modifiers: [.command]) // ⌘I
+        case .shelfCommandBar: return KeyBinding(keyCode: 40, modifiers: [.command]) // ⌘K
         }
     }
 

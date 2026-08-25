@@ -309,6 +309,10 @@ final class ShelfController {
             ShelfActionRunner.perform(.rename, scope: .selection, in: self)
             return true
         }
+        if matches(.shelfCommandBar) {
+            ShelfActionRunner.showCommandBar(in: self)
+            return true
+        }
         if matches(.shelfGetInfo) {
             ShelfActionRunner.perform(.getInfo, scope: .selection, in: self)
             return true

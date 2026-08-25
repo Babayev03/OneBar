@@ -21,7 +21,7 @@ final class ShelfDialog {
     var isPresented: Bool { panel != nil }
 
     func present(
-        title: String,
+        title: String?,
         subtitle: String?,
         width: CGFloat = 340,
         near owner: NSWindow?,
@@ -131,26 +131,30 @@ private final class DialogPanel: NSPanel {
 
 /// Title, subtitle and the glass surface, so each dialog only supplies its rows.
 private struct ShelfDialogChrome<Content: View>: View {
-    let title: String
+    /// A nil title means the content brings its own layout — the command bar
+    /// is a search field, not a form with a heading.
+    let title: String?
     let subtitle: String?
     @ViewBuilder let content: Content
     let onHeightChange: (CGFloat) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            if let title {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             content
         }
-        .padding(16)
+        .padding(title == nil ? 0 : 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 14, style: .continuous)

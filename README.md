@@ -55,6 +55,7 @@ Drag a file from one window to another without both being visible at once. **Sha
 - **Dock or retract** a shelf to a screen edge, where it collapses to a tab that peeks on hover. Snap-to-edge on move, `⌘` to suppress it, and an option to keep a shelf in the Space it was opened in
 - **Grid or list**, multi-selection, Quick Look, and per-item actions: Open, Open With, Show in Finder, **rename in place** (Finder-style — the base name is selected, the extension is not), Copy, Move to New Shelf, **Share** via the real AirDrop / Mail / Messages sheet, and Move to Trash
 - **Transform actions**: **Compress** to a zip, **convert or resize images** (JPEG / PNG / HEIC / TIFF / AVIF, plus **WebP** where `cwebp` is installed — presets or your own size and quality, and resizing keeps the format it already was and never upscales), **remove metadata** (strips EXIF, GPS and camera tags without re-encoding the image), and **merge PDFs and images into one PDF**. Results go to a folder of your choosing and can land on the shelf, in Finder, or both; **your originals are never touched**
+- **⌘K command bar** — type what you want done instead of hunting for it: "zip" finds Compress, "delete" finds Move to Trash, "webp" converts straight to WebP. Only what is currently possible is listed
 - **Get Info** for the selected item — kind, size, pixel dimensions, location and dates — and **Copy Path**
 - **Ignored apps** — add an app and shaking inside it never summons a shelf
 - Needs **no permission at all**: watching for a shake uses mouse monitors, and only *keyboard* monitors require Accessibility
@@ -63,7 +64,8 @@ Drag a file from one window to another without both being visible at once. **Sha
 | --- | --- |
 | `Space` | Quick Look |
 | `Return` | Rename in place |
-| `I` | Get Info |
+| `⌘I` | Get Info |
+| `⌘K` | Run an action — search by name or synonym |
 | `⌘O` | Open |
 | `⌘R` | Show in Finder |
 | `⌘C` / `⌘V` | Copy selection / add from clipboard |
