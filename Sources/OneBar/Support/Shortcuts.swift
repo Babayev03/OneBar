@@ -138,7 +138,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .shelfOpen: return KeyBinding(keyCode: 31, modifiers: [.command])   // ⌘O
         case .shelfShowInFinder: return KeyBinding(keyCode: 15, modifiers: [.command]) // ⌘R
         case .shelfRename: return KeyBinding(keyCode: 36)                        // Return
-        case .shelfGetInfo: return KeyBinding(keyCode: 34)                       // I
+        case .shelfGetInfo: return KeyBinding(keyCode: 34, modifiers: [.command]) // ⌘I
         }
     }
 
