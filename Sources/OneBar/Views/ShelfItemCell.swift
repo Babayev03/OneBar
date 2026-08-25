@@ -65,15 +65,26 @@ struct ShelfItemCell: View {
         VStack(spacing: 4) {
             icon
                 .frame(width: 40, height: 40)
-            if isRenaming {
-                renameField(centred: true)
-                    .frame(height: 20)
-            } else {
-                Text(item.title)
+            // The label slot holds two lines' worth of height whatever is in
+            // it. The stack is centred in a fixed-height cell, so without this
+            // the icon rides up when the rename field — taller than a one-line
+            // label — replaces the label, and sits higher in a cell whose title
+            // happens to wrap than in the one beside it.
+            ZStack(alignment: .top) {
+                Text(verbatim: "A\nA")
                     .font(.system(size: 10))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(isPresentOnDisk ? .primary : .secondary)
+                    .hidden()
+                    .accessibilityHidden(true)
+                if isRenaming {
+                    renameField(centred: true)
+                        .frame(height: 20)
+                } else {
+                    Text(item.title)
+                        .font(.system(size: 10))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(isPresentOnDisk ? .primary : .secondary)
+                }
             }
         }
         .padding(.vertical, 6)
