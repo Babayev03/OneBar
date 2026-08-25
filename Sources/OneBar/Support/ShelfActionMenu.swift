@@ -6,11 +6,19 @@ final class ShelfActionCommand: NSObject {
     let action: ShelfAction
     let scope: ShelfActionScope
     let applicationURL: URL?
+    /// A chosen preset. Absent means the custom panel.
+    let request: ImageActionRequest?
 
-    init(_ action: ShelfAction, scope: ShelfActionScope, applicationURL: URL? = nil) {
+    init(
+        _ action: ShelfAction,
+        scope: ShelfActionScope,
+        applicationURL: URL? = nil,
+        request: ImageActionRequest? = nil
+    ) {
         self.action = action
         self.scope = scope
         self.applicationURL = applicationURL
+        self.request = request
     }
 }
 
@@ -39,6 +47,18 @@ final class ShelfMenuResponder: NSObject {
               let command = sender.representedObject as? ShelfActionCommand
         else { return }
 
+        if let request = command.request {
+            ShelfActionRunner.convertImages(request, in: controller)
+            return
+        }
+        if command.action == .convertImage || command.action == .resizeImage {
+            ShelfActionRunner.customImageRequest(
+                command.action,
+                scope: command.scope,
+                in: controller
+            )
+            return
+        }
         if let application = command.applicationURL {
             ShelfActionRunner.openWith(
                 application: application,
@@ -102,11 +122,86 @@ enum ShelfActionMenu {
         item.image = symbol(action.symbol)
         item.representedObject = ShelfActionCommand(action, scope: scope)
 
-        if action == .openWith {
+        switch action {
+        case .openWith:
             item.action = nil
             item.target = nil
             item.submenu = openWithMenu(subject: subject, scope: scope, target: target)
+        case .convertImage, .resizeImage:
+            item.action = nil
+            item.target = nil
+            item.submenu = imageMenu(
+                action, subject: subject, scope: scope, target: target
+            )
+        default:
+            break
         }
+        return item
+    }
+
+    /// Presets first, so the common case is one click, with the custom panel
+    /// underneath for the sizes and qualities no preset list can cover.
+    private static func imageMenu(
+        _ action: ShelfAction,
+        subject: ShelfActionSubject,
+        scope: ShelfActionScope,
+        target: ShelfMenuResponder
+    ) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let urls = subject.imageURLs
+
+        if action == .convertImage {
+            for format in ImageFormat.allCases {
+                menu.addItem(preset(
+                    title: format.title,
+                    request: ImageActionRequest(urls: urls, format: format),
+                    scope: scope,
+                    action: action,
+                    target: target
+                ))
+            }
+        } else {
+            for resize in ImageResize.presets {
+                menu.addItem(preset(
+                    title: resize.title,
+                    // No format: a resized PNG stays a PNG.
+                    request: ImageActionRequest(urls: urls, resize: resize),
+                    scope: scope,
+                    action: action,
+                    target: target
+                ))
+            }
+        }
+
+        menu.addItem(.separator())
+        let custom = NSMenuItem(
+            title: "Custom…",
+            action: #selector(ShelfMenuResponder.runShelfAction(_:)),
+            keyEquivalent: ""
+        )
+        custom.target = target
+        custom.representedObject = ShelfActionCommand(action, scope: scope)
+        menu.addItem(custom)
+        return menu
+    }
+
+    private static func preset(
+        title: String,
+        request: ImageActionRequest,
+        scope: ShelfActionScope,
+        action: ShelfAction,
+        target: ShelfMenuResponder
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: title,
+            action: #selector(ShelfMenuResponder.runShelfAction(_:)),
+            keyEquivalent: ""
+        )
+        item.target = target
+        item.representedObject = ShelfActionCommand(
+            action, scope: scope, request: request
+        )
         return item
     }
 

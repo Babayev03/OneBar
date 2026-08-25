@@ -14,6 +14,10 @@ final class ShelfStore {
     /// Beside `history.json` and `click-layouts.json`, for the same reason: a
     /// stashed file is the sort of thing worth being able to find on disk.
     let itemsDirectory: URL
+    /// Where the transform actions write. Deliberately *not* `shelf-items`:
+    /// these are files the user asked for and can go looking for, not OneBar's
+    /// bookkeeping, so removing an item from a shelf must not delete one.
+    let outputDirectory: URL
     private let shelvesURL: URL
 
     /// Pinned shelves come back at the next launch; recents are the short
@@ -43,6 +47,7 @@ final class ShelfStore {
     /// Internal for isolated persistence tests; production uses `shared`.
     init(baseDirectory base: URL) {
         itemsDirectory = base.appendingPathComponent("shelf-items", isDirectory: true)
+        outputDirectory = base.appendingPathComponent("action-output", isDirectory: true)
         shelvesURL = base.appendingPathComponent("shelves.json")
         try? FileManager.default.createDirectory(at: itemsDirectory, withIntermediateDirectories: true)
     }
@@ -184,6 +189,20 @@ final class ShelfStore {
         for url in contents where !kept.contains(url.lastPathComponent) {
             try? FileManager.default.removeItem(at: url)
         }
+    }
+
+    /// A free name inside `action-output`, creating the directory on first use
+    /// so an unused install never carries an empty folder.
+    func outputURL(base: String, extension ext: String) -> URL? {
+        guard (try? FileManager.default.createDirectory(
+            at: outputDirectory, withIntermediateDirectories: true
+        )) != nil else { return nil }
+        let name = ShelfOutputNaming.unique(base: base, extension: ext) { candidate in
+            FileManager.default.fileExists(
+                atPath: outputDirectory.appendingPathComponent(candidate).path
+            )
+        }
+        return outputDirectory.appendingPathComponent(name)
     }
 
     func fileSize(of url: URL) -> Int? {

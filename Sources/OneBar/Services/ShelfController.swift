@@ -6,6 +6,7 @@ import SwiftUI
 enum ShelfRoute {
     case items
     case customize
+    case imageOptions
 }
 
 @MainActor
@@ -20,6 +21,12 @@ final class ShelfModel {
     var route: ShelfRoute = .items
     /// The item whose name is being edited in place, if any.
     var renamingItemID: UUID?
+    /// What the custom image panel is editing.
+    var imageRequest: ImageActionRequest?
+    /// Set while an action that writes a file is running, so the footer can say
+    /// so. One at a time per shelf — a second zip started over the first would
+    /// race for the same output name.
+    var activity: String?
     var name: String?
     var colorName: String?
     var colorSource: ShelfColorSource = .automatic
@@ -242,7 +249,7 @@ final class ShelfController {
             // which cancels the rename. This monitor sees the key first, so it
             // has to decline it rather than close the shelf out from under it.
             if model.renamingItemID != nil { return false }
-            if model.route == .customize { showItems() }
+            if model.route == .customize || model.route == .imageOptions { showItems() }
             else if model.collapse != nil { expand() }
             else { close() }
             return true
@@ -712,7 +719,32 @@ final class ShelfController {
 
     func showItems() {
         model.route = .items
+        model.imageRequest = nil
         resize()
+    }
+
+    /// The custom half of the image actions. Focus is taken because the panel
+    /// has a field to type a size into, exactly as Customize does.
+    func showImageOptions(_ request: ImageActionRequest) {
+        guard !request.urls.isEmpty else { return }
+        model.imageRequest = request
+        model.route = .imageOptions
+        resize()
+        panel?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Long-running actions
+
+    /// Refuses a second one while the first is still going.
+    func beginActivity(_ label: String) -> Bool {
+        guard isActive, model.activity == nil else { return false }
+        model.activity = label
+        return true
+    }
+
+    func endActivity() {
+        model.activity = nil
     }
 
     /// Pulls the items from the last shelf that was closed into this one — the
@@ -1345,6 +1377,7 @@ final class ShelfController {
 
     private func desiredHeight() -> CGFloat {
         if model.route == .customize { return Self.headerHeight + 216 }
+        if model.route == .imageOptions { return Self.headerHeight + 208 }
         guard !model.items.isEmpty else {
             // The restore button only appears when there is something to
             // restore, and it needs the room.

@@ -44,7 +44,7 @@ struct ShelfActionTests {
         #expect(ShelfAction.addFromClipboard.isAvailable(for: subject))
     }
 
-    @Test("A file on disk offers the whole file menu")
+    @Test("A file on disk offers every action that is not about images")
     func fileOnDisk() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -53,8 +53,13 @@ struct ShelfActionTests {
             items: [try makeFile(in: directory, named: "note.txt")],
             shelfItemCount: 1
         )
+        // A lone text file is not an image and cannot be merged with itself.
+        let inapplicable: Set<ShelfAction> = [.convertImage, .resizeImage, .mergePDF]
         for action in ShelfAction.allCases {
-            #expect(action.isAvailable(for: subject), "\(action.rawValue) should be available")
+            #expect(
+                action.isAvailable(for: subject) == !inapplicable.contains(action),
+                "\(action.rawValue) availability is wrong for a lone text file"
+            )
         }
     }
 

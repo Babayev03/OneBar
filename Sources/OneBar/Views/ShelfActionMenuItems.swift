@@ -24,7 +24,37 @@ struct ShelfActionMenuItems: View {
 
     @ViewBuilder
     private func row(_ action: ShelfAction, subject: ShelfActionSubject) -> some View {
-        if action == .openWith {
+        if action == .convertImage || action == .resizeImage {
+            Menu {
+                let urls = subject.imageURLs
+                if action == .convertImage {
+                    ForEach(ImageFormat.allCases) { format in
+                        Button(format.title) {
+                            ShelfActionRunner.convertImages(
+                                ImageActionRequest(urls: urls, format: format),
+                                in: controller
+                            )
+                        }
+                    }
+                } else {
+                    ForEach(ImageResize.presets, id: \.self) { resize in
+                        Button(resize.title) {
+                            // No format: a resized PNG stays a PNG.
+                            ShelfActionRunner.convertImages(
+                                ImageActionRequest(urls: urls, resize: resize),
+                                in: controller
+                            )
+                        }
+                    }
+                }
+                Divider()
+                Button("Custom…") {
+                    ShelfActionRunner.customImageRequest(action, scope: scope, in: controller)
+                }
+            } label: {
+                Label(action.title, systemImage: action.symbol)
+            }
+        } else if action == .openWith {
             Menu {
                 let applications = ShelfActionRunner.applications(openingAllOf: subject.fileURLs)
                 if applications.isEmpty {

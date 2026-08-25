@@ -50,6 +50,20 @@ enum ShelfActionRunner {
             transfer(subject.items, from: controller, operation: .copy)
         case .share:
             share(subject, anchoredTo: view ?? controller.anchorView)
+        case .compress:
+            let urls = subject.fileURLs
+            produce(in: controller, activity: "Compressing…", success: "Compressed") {
+                [try await ShelfTransforms.compress(urls)]
+            }
+        case .convertImage, .resizeImage:
+            // Reached through the submenu, which carries the preset or opens
+            // the custom panel.
+            break
+        case .mergePDF:
+            let urls = subject.printableURLs
+            produce(in: controller, activity: "Merging…", success: "Merged to PDF") {
+                [try await ShelfTransforms.mergePDF(urls)]
+            }
         case .moveToTrash:
             trash(subject, in: controller)
         case .removeFromShelf:
@@ -112,6 +126,70 @@ enum ShelfActionRunner {
             operation: operation
         )
         if !moved { HUD.show("Nothing was transferred", symbol: "tray") }
+    }
+
+    // MARK: - Transforms
+
+    /// Runs a preset straight from the menu.
+    static func convertImages(_ request: ImageActionRequest, in controller: ShelfController) {
+        guard !request.urls.isEmpty else { return }
+        produce(in: controller, activity: "Converting…", success: "Converted") {
+            try await ShelfTransforms.convert(request)
+        }
+    }
+
+    /// Opens the custom panel rather than acting, seeded from the selection.
+    static func customImageRequest(
+        _ action: ShelfAction,
+        scope: ShelfActionScope,
+        in controller: ShelfController
+    ) {
+        let urls = subject(for: scope, in: controller).imageURLs
+        guard !urls.isEmpty else { return }
+        controller.showImageOptions(
+            ImageActionRequest(
+                urls: urls,
+                format: .jpeg,
+                resize: action == .resizeImage ? .longestEdge(1024) : .original
+            )
+        )
+    }
+
+    /// The one path for everything that writes a file: hold the shelf busy, do
+    /// the work off the main actor, then put the results on the shelf so they
+    /// can be dragged straight out. The originals are left exactly as they were.
+    private static func produce(
+        in controller: ShelfController,
+        activity: String,
+        success: String,
+        work: @escaping @Sendable () async throws -> [URL]
+    ) {
+        guard controller.beginActivity(activity) else {
+            HUD.show("Already working on this shelf", symbol: "hourglass")
+            return
+        }
+        Task { @MainActor in
+            defer { controller.endActivity() }
+            do {
+                let produced = try await Task.detached(priority: .userInitiated) {
+                    try await work()
+                }.value
+                guard controller.isActive else { return }
+                let items = produced.compactMap { ShelfItemReader.fileItem(for: $0) }
+                guard !items.isEmpty else {
+                    HUD.show("Nothing was produced", symbol: "exclamationmark.triangle")
+                    return
+                }
+                controller.add(items)
+                HUD.show(success, symbol: "checkmark.circle.fill")
+            } catch {
+                guard controller.isActive else { return }
+                HUD.show(
+                    (error as? ShelfTransformError)?.errorDescription ?? "The action failed",
+                    symbol: "exclamationmark.triangle"
+                )
+            }
+        }
     }
 
     // MARK: - Sharing

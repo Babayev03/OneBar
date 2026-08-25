@@ -54,6 +54,7 @@ Drag a file from one window to another without both being visible at once. **Sha
 - **Several shelves at once**, each with its own name and colour. **Pin** one and it comes back at launch; close one by accident and it waits on a recents list
 - **Dock or retract** a shelf to a screen edge, where it collapses to a tab that peeks on hover. Snap-to-edge on move, `⌘` to suppress it, and an option to keep a shelf in the Space it was opened in
 - **Grid or list**, multi-selection, Quick Look, and per-item actions: Open, Open With, Show in Finder, **rename in place** (Finder-style — the base name is selected, the extension is not), Copy, Move to New Shelf, **Share** via the real AirDrop / Mail / Messages sheet, and Move to Trash
+- **Transform actions**: **Compress** to a zip, **convert or resize images** (JPEG / PNG / HEIC / TIFF, presets or your own size and quality — resizing keeps the format it already was, and never upscales), and **merge PDFs and images into one PDF**. Results are written to a separate folder and dropped onto the shelf ready to drag out; **your originals are never touched**
 - **Ignored apps** — add an app and shaking inside it never summons a shelf
 - Needs **no permission at all**: watching for a shake uses mouse monitors, and only *keyboard* monitors require Accessibility
 

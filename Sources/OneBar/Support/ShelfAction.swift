@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 /// One entry in a shelf's action menu.
 enum ShelfAction: String, CaseIterable, Identifiable {
@@ -13,6 +14,10 @@ enum ShelfAction: String, CaseIterable, Identifiable {
     case moveToNewShelf
     case copyToNewShelf
     case share
+    case compress
+    case convertImage
+    case resizeImage
+    case mergePDF
     case moveToTrash
     case removeFromShelf
     case clearShelf
@@ -31,6 +36,10 @@ enum ShelfAction: String, CaseIterable, Identifiable {
         case .moveToNewShelf: return "Move to New Shelf"
         case .copyToNewShelf: return "Copy to New Shelf"
         case .share: return "Share"
+        case .compress: return "Compress"
+        case .convertImage: return "Convert Image"
+        case .resizeImage: return "Resize Image"
+        case .mergePDF: return "Merge to PDF"
         case .moveToTrash: return "Move to Trash"
         case .removeFromShelf: return "Remove From Shelf"
         case .clearShelf: return "Clear Shelf"
@@ -49,6 +58,10 @@ enum ShelfAction: String, CaseIterable, Identifiable {
         case .moveToNewShelf: return "tray.and.arrow.up"
         case .copyToNewShelf: return "tray.full"
         case .share: return "square.and.arrow.up"
+        case .compress: return "archivebox"
+        case .convertImage: return "photo.on.rectangle.angled"
+        case .resizeImage: return "aspectratio"
+        case .mergePDF: return "doc.on.doc.fill"
         case .moveToTrash: return "trash"
         case .removeFromShelf: return "minus.circle"
         case .clearShelf: return "xmark.bin"
@@ -62,6 +75,7 @@ enum ShelfAction: String, CaseIterable, Identifiable {
         [.copy, .addFromClipboard],
         [.moveToNewShelf, .copyToNewShelf],
         [.share],
+        [.compress, .convertImage, .resizeImage, .mergePDF],
         [.moveToTrash, .removeFromShelf, .clearShelf],
     ]
 
@@ -76,6 +90,11 @@ enum ShelfAction: String, CaseIterable, Identifiable {
             return !subject.items.isEmpty
         case .addFromClipboard: return true
         case .share: return subject.hasShareableContent
+        case .compress: return !subject.fileURLs.isEmpty
+        case .convertImage, .resizeImage: return !subject.imageURLs.isEmpty
+        // One document merged into a PDF is the document. Two or more is the
+        // feature.
+        case .mergePDF: return subject.printableURLs.count > 1
         // Only offered when there is a real user file to trash. An item OneBar
         // materialised itself lives in Application Support, and putting that in
         // the Trash would be a confusing thing to hand someone.
@@ -113,7 +132,28 @@ struct ShelfActionSubject {
         items.filter { !$0.isMaterialised }.compactMap { $0.resolveURL() }
     }
 
+    /// Only what Image I/O will actually open. `ShelfItem.Kind.image` is not
+    /// enough on its own — a file dropped from Finder is `.file` whatever it
+    /// holds, and a `.image` item could be a format nothing can decode.
+    var imageURLs: [URL] { fileURLs.filter { $0.conformsToType(.image) } }
+
+    /// What can become a page: a PDF keeps its own pages, an image becomes one.
+    var printableURLs: [URL] {
+        fileURLs.filter { $0.conformsToType(.image) || $0.conformsToType(.pdf) }
+    }
+
     var hasShareableContent: Bool {
         !activationURLs.isEmpty || items.contains { $0.kind == .text && $0.text?.isEmpty == false }
+    }
+}
+
+
+extension URL {
+    /// Asks the file system what the file actually is rather than trusting its
+    /// extension, which is what a renamed file makes unreliable.
+    func conformsToType(_ type: UTType) -> Bool {
+        guard let contentType = try? resourceValues(forKeys: [.contentTypeKey]).contentType
+        else { return false }
+        return contentType.conforms(to: type)
     }
 }

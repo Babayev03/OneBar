@@ -22,6 +22,8 @@ struct ShelfView: View {
                 }
             case .customize:
                 ShelfCustomizeView(controller: controller)
+            case .imageOptions:
+                ShelfImageOptionsView(controller: controller)
             }
         }
         .opacity(showsDockHandle ? 0 : 1)
@@ -259,7 +261,13 @@ struct ShelfView: View {
 
     private var footer: some View {
         HStack(spacing: 4) {
-            if model.selection.isEmpty {
+            if let activity = model.activity {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.7)
+                    .frame(width: 12, height: 12)
+                Text(activity)
+            } else if model.selection.isEmpty {
                 Text(model.items.count == 1 ? "1 item" : "\(model.items.count) items")
                 if model.totalSize > 0 {
                     Text("·")
