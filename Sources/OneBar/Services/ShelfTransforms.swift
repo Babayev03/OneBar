@@ -200,12 +200,19 @@ enum ShelfTransforms {
 
         // An unset format keeps the file as it is, so a resized PNG stays a
         // PNG. Anything we cannot write back — GIF, WebP — becomes a JPEG.
-        let format = request.format ?? sourceFormat(of: source) ?? .jpeg
+        let original = sourceFormat(of: source)
+        let format = request.format ?? original ?? .jpeg
+        // `.jpeg` and `.jpg` are both JPEG. Where the format has not actually
+        // changed, the file keeps the spelling it already had rather than being
+        // quietly renamed to whichever one we happen to prefer.
+        let fileExtension = (original == format && !url.pathExtension.isEmpty)
+            ? url.pathExtension.lowercased()
+            : format.fileExtension
         let resized = request.resize != .original && edge < Int(max(pixelSize.width, pixelSize.height))
         let base = ShelfOutputNaming.imageOutputBase(for: url, longestEdge: edge, resized: resized)
         guard let destination = store.outputURL(
             base: base,
-            extension: format.fileExtension,
+            extension: fileExtension,
             in: request.folder
         ) else { throw ShelfTransformError.noOutputLocation }
 

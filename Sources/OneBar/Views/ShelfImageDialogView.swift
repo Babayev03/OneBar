@@ -73,22 +73,24 @@ struct ShelfImageDialogView: View {
             Divider()
 
             row("Show output in") {
-                Picker("", selection: $request.reveal) {
+                Picker("", selection: revealBinding) {
                     ForEach(ShelfOutputReveal.allCases) { Text($0.title).tag($0) }
                 }
                 .labelsHidden()
                 .frame(width: 130)
             }
 
-            row("Save in") {
-                HStack(spacing: 6) {
-                    Text(folderLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                    Button("Choose…") { chooseFolder() }
-                        .controlSize(.small)
+            if request.reveal.usesChosenFolder {
+                row("Save in") {
+                    HStack(spacing: 6) {
+                        Text(folderLabel)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                        Button("Choose…") { chooseFolder() }
+                            .controlSize(.small)
+                    }
                 }
             }
 
@@ -125,6 +127,17 @@ struct ShelfImageDialogView: View {
     private var folderLabel: String {
         guard let folder = request.folder else { return "OneBar's output folder" }
         return folder.lastPathComponent
+    }
+
+    private var revealBinding: Binding<ShelfOutputReveal> {
+        Binding(
+            get: { request.reveal },
+            set: { reveal in
+                request.reveal = reveal
+                // Nothing to find means nowhere to put it.
+                if !reveal.usesChosenFolder { request.folder = nil }
+            }
+        )
     }
 
     private func chooseFolder() {

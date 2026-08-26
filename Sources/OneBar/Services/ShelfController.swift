@@ -562,7 +562,7 @@ final class ShelfController {
                 guard let self, self.isActive, self.model.collapse == nil else { return }
                 // A settled edge, not the nearest one: a shake happens wherever
                 // the pointer is, so "nearest" put every shelf somewhere else.
-                self.retract(to: AppState.shared.shelfAutoRetractEdge.edge)
+                self.autoRetract()
             }
         }
         return accepted
@@ -1006,6 +1006,24 @@ final class ShelfController {
     }
 
     // MARK: - Docking, retracting and peeking
+
+    /// The retract a shelf does on its own after its first drop.
+    ///
+    /// It is lifted to a common row first. A collapse otherwise keeps whatever
+    /// height the shelf was at, and a shake happens wherever the pointer is —
+    /// so without this every shelf ends up at a different height along the edge
+    /// and none of them stack together.
+    func autoRetract() {
+        if let panel, let visible = visibleFrame(for: panel.frame) {
+            var frame = panel.frame
+            frame.origin.y = max(
+                visible.minY + ShelfWindowGeometry.margin,
+                visible.maxY - frame.height - ShelfWindowGeometry.margin
+            )
+            panel.setFrame(frame, display: false)
+        }
+        retract(to: AppState.shared.shelfAutoRetractEdge.edge)
+    }
 
     func dock(to edge: ShelfEdge? = nil) { collapse(.docked, to: edge) }
     func retract(to edge: ShelfEdge? = nil) { collapse(.retracted, to: edge) }

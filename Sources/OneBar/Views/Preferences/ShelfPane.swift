@@ -218,24 +218,6 @@ struct ShelfPane: View {
                         .frame(width: 150)
                     }
                     Divider()
-                    row("Save action output in", subtitle: "Where Compress, Convert, Resize, Remove Metadata and Merge to PDF write. Convert and Resize can override it for one run.") {
-                        HStack(spacing: 6) {
-                            Text(outputFolderLabel)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                            Button("Choose…") { chooseOutputFolder() }
-                                .controlSize(.small)
-                            if !state.shelfOutputFolder.isEmpty {
-                                Button("Reset") { state.shelfOutputFolder = "" }
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-
-                    Divider()
-
                     row("Show output in", subtitle: nil) {
                         Picker("", selection: outputRevealBinding) {
                             ForEach(ShelfOutputReveal.allCases) { Text($0.title).tag($0) }
@@ -243,6 +225,30 @@ struct ShelfPane: View {
                         .labelsHidden()
                         .frame(width: 150)
                     }
+
+                    Divider()
+
+                    Divider()
+
+                    if state.shelfOutputReveal.usesChosenFolder {
+                        row("Save action output in", subtitle: "Where Compress, Convert, Resize, Remove Metadata and Merge to PDF write. Convert and Resize can override it for one run.") {
+                            HStack(spacing: 6) {
+                                Text(outputFolderLabel)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.head)
+                                Button("Choose…") { chooseOutputFolder() }
+                                    .controlSize(.small)
+                                if !state.shelfOutputFolder.isEmpty {
+                                    Button("Reset") { state.shelfOutputFolder = "" }
+                                        .controlSize(.small)
+                                }
+                            }
+                        }
+                    }
+
+                    Divider()
 
                     Divider()
 

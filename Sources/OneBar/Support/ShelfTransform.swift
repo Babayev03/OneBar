@@ -120,6 +120,11 @@ enum ShelfOutputReveal: String, Codable, CaseIterable, Identifiable {
 
     var addsToShelf: Bool { self != .finder }
     var revealsInFinder: Bool { self != .shelf }
+
+    /// Somewhere to put the result only matters when you are meant to go and
+    /// find it. Sending it to the shelf alone keeps it in OneBar's own folder,
+    /// where nothing has to be tidied up afterwards.
+    var usesChosenFolder: Bool { self != .shelf }
 }
 
 /// One image conversion, whether it came from a preset or the custom panel.

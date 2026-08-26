@@ -364,3 +364,59 @@ struct ShelfTransformTests {
         #expect(ShelfAction.convertImage.isAvailable(for: mislabelled))
     }
 }
+
+@Suite("Shelf output destination")
+struct ShelfOutputTests {
+    @Test("A chosen folder only applies when something will go looking for the file")
+    func folderAppliesOnlyWhenRevealed() {
+        // Sending the result to the shelf alone means there is nothing to find,
+        // so it stays in OneBar's own folder rather than landing in Downloads.
+        #expect(!ShelfOutputReveal.shelf.usesChosenFolder)
+        #expect(ShelfOutputReveal.finder.usesChosenFolder)
+        #expect(ShelfOutputReveal.both.usesChosenFolder)
+    }
+
+    @Test("Shelf-only never reveals, Finder-only never adds to the shelf")
+    func revealSplit() {
+        #expect(ShelfOutputReveal.shelf.addsToShelf)
+        #expect(!ShelfOutputReveal.shelf.revealsInFinder)
+        #expect(!ShelfOutputReveal.finder.addsToShelf)
+        #expect(ShelfOutputReveal.finder.revealsInFinder)
+        #expect(ShelfOutputReveal.both.addsToShelf)
+        #expect(ShelfOutputReveal.both.revealsInFinder)
+    }
+
+    @Test("An unchanged format keeps the file's own spelling")
+    func keepsSourceExtension() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shelf-ext-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ShelfStore(baseDirectory: directory)
+
+        // A JPEG that spells its extension the long way.
+        let source = directory.appendingPathComponent("holiday.jpeg")
+        let context = CGContext(
+            data: nil, width: 40, height: 40, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )!
+        let writer = CGImageDestinationCreateWithURL(
+            source as CFURL, UTType.jpeg.identifier as CFString, 1, nil
+        )!
+        CGImageDestinationAddImage(writer, context.makeImage()!, nil)
+        #expect(CGImageDestinationFinalize(writer))
+
+        // JPEG to JPEG is not a rename, so ".jpeg" survives.
+        let same = try await ShelfTransforms.convert(
+            ImageActionRequest(urls: [source], format: .jpeg), store: store
+        )
+        #expect(same.first?.pathExtension == "jpeg")
+
+        // A real change takes the new format's own extension.
+        let changed = try await ShelfTransforms.convert(
+            ImageActionRequest(urls: [source], format: .png), store: store
+        )
+        #expect(changed.first?.pathExtension == "png")
+    }
+}

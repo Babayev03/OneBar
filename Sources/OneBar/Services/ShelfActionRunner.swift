@@ -215,9 +215,12 @@ enum ShelfActionRunner {
 
     // MARK: - Transforms
 
-    /// The folder the user last chose, if it is still there. A folder that has
-    /// been moved or unmounted falls back rather than failing every action.
+    /// The folder the user chose, if it is still there and if it applies at
+    /// all. Sending the result to the shelf alone means there is nothing to go
+    /// and find, so it stays in OneBar's own folder. A folder that has been
+    /// moved or unmounted falls back rather than failing every action.
     static var defaultFolder: URL? {
+        guard AppState.shared.shelfOutputReveal.usesChosenFolder else { return nil }
         let path = AppState.shared.shelfOutputFolder
         guard !path.isEmpty else { return nil }
         var isDirectory: ObjCBool = false

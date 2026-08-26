@@ -60,6 +60,10 @@ final class ShelfProgressPanel {
         guard panel != nil else { return }
         model.finished = message
         model.detail = nil
+        // A run that finished before it could report leaves the bar at zero,
+        // which under the word "Converted" reads as stuck.
+        model.total = max(model.total, 1)
+        model.completed = model.total
         closeTask?.cancel()
         closeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(1400))
