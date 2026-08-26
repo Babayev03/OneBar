@@ -364,3 +364,68 @@ struct ShelfWindowBehaviorTests {
         ) == second)
     }
 }
+
+@Suite("Retract packing")
+struct ShelfRetractPackingTests {
+    private let visible = NSRect(x: 0, y: 0, width: 1500, height: 900)
+
+    @Test("The first shelf takes the top of the column")
+    func firstTakesTop() {
+        let row = ShelfWindowGeometry.firstFreeRow(height: 200, in: visible, occupiedRows: [])
+        #expect(row == 900 - 200 - ShelfWindowGeometry.margin)
+    }
+
+    @Test("Later shelves fill downward instead of piling on the first")
+    func fillsDownward() throws {
+        var occupied: [ClosedRange<CGFloat>] = []
+        var rows: [CGFloat] = []
+        for _ in 0..<4 {
+            let row = try #require(
+                ShelfWindowGeometry.firstFreeRow(height: 200, in: visible, occupiedRows: occupied)
+            )
+            rows.append(row)
+            occupied.append(row...(row + 200))
+        }
+        // Strictly descending, and never overlapping what is already there.
+        #expect(rows == rows.sorted(by: >))
+        for (index, row) in rows.enumerated().dropFirst() {
+            #expect(row + 200 < rows[index - 1])
+        }
+    }
+
+    @Test("A full column reports no room, which is the cue to stack")
+    func fullColumn() {
+        // Four 200pt shelves plus spacing do not leave a fifth row in 900pt.
+        var occupied: [ClosedRange<CGFloat>] = []
+        var placed = 0
+        while let row = ShelfWindowGeometry.firstFreeRow(
+            height: 200, in: visible, occupiedRows: occupied
+        ) {
+            occupied.append(row...(row + 200))
+            placed += 1
+            if placed > 10 { break }
+        }
+        #expect(placed == 4)
+        #expect(ShelfWindowGeometry.firstFreeRow(
+            height: 200, in: visible, occupiedRows: occupied
+        ) == nil)
+    }
+
+    @Test("A gap left by a closed shelf is reused before the bottom")
+    func reusesGaps() throws {
+        let top = 900 - 200 - ShelfWindowGeometry.margin
+        // The top row is free; the one under it is taken.
+        let second = top - 10 - 200
+        let row = try #require(ShelfWindowGeometry.firstFreeRow(
+            height: 200, in: visible, occupiedRows: [second...(second + 200)]
+        ))
+        #expect(row == top)
+    }
+
+    @Test("A shelf taller than the display gets no row at all")
+    func tooTall() {
+        #expect(ShelfWindowGeometry.firstFreeRow(
+            height: 2000, in: visible, occupiedRows: []
+        ) == nil)
+    }
+}

@@ -16,6 +16,9 @@ struct ShelfPane: View {
     @State private var section: Section = .activation
     @State private var selectedApp: IgnoredApp.ID?
     @State private var hasNotchedDisplay = false
+    /// Read once when the pane appears rather than on every redraw: measuring a
+    /// folder walks it.
+    @State private var outputFolderBytes = 0
 
     var body: some View {
         VStack(spacing: 12) {
@@ -39,7 +42,10 @@ struct ShelfPane: View {
                 .padding(.bottom, 20)
             }
         }
-        .onAppear { refreshNotchAvailability() }
+        .onAppear {
+            refreshNotchAvailability()
+            outputFolderBytes = ShelfStore.shared.outputFolderSize()
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didChangeScreenParametersNotification
         )) { _ in
@@ -226,11 +232,9 @@ struct ShelfPane: View {
                         .frame(width: 150)
                     }
 
-                    Divider()
-
-                    Divider()
-
                     if state.shelfOutputReveal.usesChosenFolder {
+                        Divider()
+
                         row("Save action output in", subtitle: "Where Compress, Convert, Resize, Remove Metadata and Merge to PDF write. Convert and Resize can override it for one run.") {
                             HStack(spacing: 6) {
                                 Text(outputFolderLabel)
@@ -249,6 +253,19 @@ struct ShelfPane: View {
                     }
 
                     Divider()
+
+                    row(
+                        "OneBar's output folder",
+                        subtitle: "Holds \(outputFolderSize). Nothing here is deleted on its own — an output is a file you asked for. Clearing it leaves any shelf item that still points at one showing as missing."
+                    ) {
+                        HStack(spacing: 6) {
+                            Button("Reveal") { revealOutputFolder() }
+                                .controlSize(.small)
+                            Button("Clear") { clearOutputFolder() }
+                                .controlSize(.small)
+                                .disabled(outputFolderBytes == 0)
+                        }
+                    }
 
                     Divider()
 
@@ -491,6 +508,27 @@ struct ShelfPane: View {
             state.shelfColorLabels = $0
             manager.setColorLabels($0)
         })
+    }
+
+    private var outputFolderSize: String {
+        let bytes = outputFolderBytes
+        guard bytes > 0 else { return "nothing yet" }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private func revealOutputFolder() {
+        let directory = ShelfStore.shared.outputDirectory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: directory.path)
+    }
+
+    private func clearOutputFolder() {
+        let removed = ShelfStore.shared.clearOutputFolder()
+        outputFolderBytes = ShelfStore.shared.outputFolderSize()
+        HUD.show(
+            removed == 1 ? "Removed 1 file" : "Removed \(removed) files",
+            symbol: "trash"
+        )
     }
 
     private var autoRetractEdgeBinding: Binding<ShelfCollapseEdge> {

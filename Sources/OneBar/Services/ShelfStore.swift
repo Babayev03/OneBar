@@ -208,6 +208,30 @@ final class ShelfStore {
         return directory.appendingPathComponent(name)
     }
 
+    /// What the action folder is holding, so it can be seen before it is
+    /// cleared. Zero when nothing has ever been written.
+    func outputFolderSize() -> Int {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: outputDirectory, includingPropertiesForKeys: nil
+        ) else { return 0 }
+        return contents.reduce(0) { $0 + (fileSize(of: $1) ?? 0) }
+    }
+
+    /// Empties the action folder. Deliberately only its direct contents: this
+    /// is the one directory OneBar fills on the user's behalf and never tidies
+    /// on its own, since an output is a file they asked for.
+    @discardableResult
+    func clearOutputFolder() -> Int {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: outputDirectory, includingPropertiesForKeys: nil
+        ) else { return 0 }
+        var removed = 0
+        for url in contents where (try? FileManager.default.removeItem(at: url)) != nil {
+            removed += 1
+        }
+        return removed
+    }
+
     func fileSize(of url: URL) -> Int? {
         let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .fileSizeKey, .isDirectoryKey]
         guard let values = try? url.resourceValues(forKeys: keys) else { return nil }

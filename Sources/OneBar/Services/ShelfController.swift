@@ -105,6 +105,9 @@ final class ShelfController {
     private var needsScreenReclamp = false
     private var activityTask: Task<Void, Never>?
     private var wantsFocusAfterFirstDrop = false
+    /// Where an automatic retract wants to sit, applied as part of the collapse
+    /// animation rather than as a jump before it.
+    private var collapseAnchorY: CGFloat?
 
     private static let dockAnimationDuration = 0.22
 
@@ -1014,25 +1017,41 @@ final class ShelfController {
     /// so without this every shelf ends up at a different height along the edge
     /// and none of them stack together.
     func autoRetract() {
+        let preferred = AppState.shared.shelfAutoRetractEdge.edge
+        var anchor: CGFloat?
         if let panel, let visible = visibleFrame(for: panel.frame) {
-            var frame = panel.frame
-            frame.origin.y = max(
+            let edge = preferred ?? nearestEdge(in: visible)
+            // Fill the column downward first; only once it is full does a shelf
+            // go back to the top, where it stacks in front of the first one.
+            anchor = ShelfWindowGeometry.firstFreeRow(
+                height: panel.frame.height,
+                in: visible,
+                occupiedRows: ShelfManager.shared.collapsedRows(
+                    on: edge, in: visible, excluding: self
+                )
+            ) ?? max(
                 visible.minY + ShelfWindowGeometry.margin,
-                visible.maxY - frame.height - ShelfWindowGeometry.margin
+                visible.maxY - panel.frame.height - ShelfWindowGeometry.margin
             )
-            panel.setFrame(frame, display: false)
         }
-        retract(to: AppState.shared.shelfAutoRetractEdge.edge)
+        retract(to: preferred, anchorY: anchor)
     }
 
     func dock(to edge: ShelfEdge? = nil) { collapse(.docked, to: edge) }
-    func retract(to edge: ShelfEdge? = nil) { collapse(.retracted, to: edge) }
+
+    func retract(to edge: ShelfEdge? = nil, anchorY: CGFloat? = nil) {
+        collapse(.retracted, to: edge, anchorY: anchorY)
+    }
 
     func toggleDock(_ edge: ShelfEdge? = nil) {
         if model.collapse == .docked { expand() } else { dock(to: edge) }
     }
 
-    private func collapse(_ mode: ShelfCollapse, to requestedEdge: ShelfEdge?) {
+    private func collapse(
+        _ mode: ShelfCollapse,
+        to requestedEdge: ShelfEdge?,
+        anchorY: CGFloat? = nil
+    ) {
         guard let panel else { return }
         expansionTask?.cancel()
         expansionTask = nil
@@ -1054,6 +1073,7 @@ final class ShelfController {
         model.collapse = mode
         model.collapseEdge = edge
         model.isPeeking = false
+        collapseAnchorY = anchorY
         collapseStackDepth = 0
         collapseVisibleFrame = visible
         model.selection.removeAll()
@@ -1068,6 +1088,7 @@ final class ShelfController {
     }
 
     func expand() {
+        collapseAnchorY = nil
         guard let panel,
               model.collapse != nil,
               let edge = model.collapseEdge,
@@ -1348,9 +1369,14 @@ final class ShelfController {
               let edge = model.collapseEdge,
               let visible = collapseDisplayFrame(fallback: panel.frame)
         else { return }
+        // The anchor rides in on the source frame so the whole move — across
+        // to the edge and down to its row — is one animation rather than a
+        // jump followed by a slide.
+        var source = panel.frame
+        if let collapseAnchorY { source.origin.y = collapseAnchorY }
         setFrame(
             ShelfWindowGeometry.collapsed(
-                panel.frame,
+                source,
                 mode: mode,
                 edge: edge,
                 in: visible,

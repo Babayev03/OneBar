@@ -138,6 +138,37 @@ enum ShelfWindowGeometry {
         )
     }
 
+    /// The first free row down an edge, so retracted shelves fill the column
+    /// before any of them starts stacking in front of another. Returns nil when
+    /// the column has no room left, which is the caller's cue to stack.
+    static func firstFreeRow(
+        height: CGFloat,
+        in visible: NSRect,
+        occupiedRows: [ClosedRange<CGFloat>],
+        spacing: CGFloat = 10
+    ) -> CGFloat? {
+        let top = visible.maxY - height - margin
+        let floor = visible.minY + margin
+        guard top >= floor else { return nil }
+
+        var candidate = top
+        // Each pass drops below whatever is in the way, so the search walks down
+        // the edge rather than looping between two overlapping neighbours.
+        for _ in 0..<(occupiedRows.count + 1) {
+            // Strict comparisons, so a neighbour exactly `spacing` away is a
+            // tidy gap rather than a collision that pushes this shelf past it.
+            let low = candidate - spacing
+            let high = candidate + height + spacing
+            let blocking = occupiedRows.filter { $0.lowerBound < high && $0.upperBound > low }
+            guard let lowest = blocking.map(\.lowerBound).min() else {
+                return candidate >= floor ? candidate : nil
+            }
+            candidate = lowest - spacing - height
+            guard candidate >= floor else { return nil }
+        }
+        return candidate >= floor ? candidate : nil
+    }
+
     static func rested(_ frame: NSRect, edge: ShelfEdge, in visible: NSRect) -> NSRect {
         var result = clamped(frame, to: visible)
         result.origin.x = edge == .left
