@@ -186,6 +186,24 @@ final class ShelfManager {
     /// filled and two collapsed shelves occupy the same row, they become a
     /// horizontal card stack: the newest stays at the edge and older cards are
     /// shifted inward far enough to expose their titles.
+    private var restackSettleTask: Task<Void, Never>?
+
+    /// Runs the pass again once every collapse animation has landed.
+    ///
+    /// A restack triggered while another shelf is still sliding reads a frame
+    /// in flight, and the depth that comes out of it sticks. The settled row is
+    /// the authority now, so this is a belt to that brace — cheap, and it fixes
+    /// a shelf left inset with nothing in front of it rather than leaving the
+    /// user to spot it.
+    func scheduleRestackSettle() {
+        restackSettleTask?.cancel()
+        restackSettleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(320))
+            guard !Task.isCancelled else { return }
+            self?.restackCollapsedShelves(animated: true)
+        }
+    }
+
     func restackCollapsedShelves(animated: Bool) {
         var clusters: [[ShelfController]] = []
         for controller in shelves where controller.collapseStackData != nil {

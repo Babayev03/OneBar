@@ -105,9 +105,13 @@ final class ShelfController {
     private var needsScreenReclamp = false
     private var activityTask: Task<Void, Never>?
     private var wantsFocusAfterFirstDrop = false
-    /// Where an automatic retract wants to sit, applied as part of the collapse
-    /// animation rather than as a jump before it.
-    private var collapseAnchorY: CGFloat?
+    /// The row this shelf has settled on while collapsed.
+    ///
+    /// Not read from the window, because the window may be part-way through the
+    /// collapse animation. Clustering that reads a frame in flight puts a shelf
+    /// in a row it is only travelling across, and the depth that comes out of
+    /// that sticks long after the animation has ended.
+    private var collapseRow: CGFloat?
     /// True for a shelf summoned by a shake, which appears under the pointer
     /// rather than at the place every other shelf is put.
     private let placedAtCursor: Bool
@@ -1070,7 +1074,7 @@ final class ShelfController {
         model.collapse = mode
         model.collapseEdge = edge
         model.isPeeking = false
-        collapseAnchorY = anchorY
+        collapseRow = anchorY ?? baseFrame.minY
         collapseStackDepth = 0
         collapseVisibleFrame = visible
         model.selection.removeAll()
@@ -1082,10 +1086,11 @@ final class ShelfController {
             stopHoverWatch()
         }
         ShelfManager.shared.restackCollapsedShelves(animated: true)
+        ShelfManager.shared.scheduleRestackSettle()
     }
 
     func expand() {
-        collapseAnchorY = nil
+        collapseRow = nil
         guard let panel,
               model.collapse != nil,
               let edge = model.collapseEdge,
@@ -1353,8 +1358,10 @@ final class ShelfController {
         guard model.collapse != nil,
               let edge = model.collapseEdge,
               let visible = collapseVisibleFrame,
-              let frame = panel?.frame
+              let live = panel?.frame
         else { return nil }
+        var frame = live
+        if let collapseRow { frame.origin.y = collapseRow }
         return (edge, visible, frame)
     }
 
@@ -1366,11 +1373,12 @@ final class ShelfController {
               let edge = model.collapseEdge,
               let visible = collapseDisplayFrame(fallback: panel.frame)
         else { return }
-        // The anchor rides in on the source frame so the whole move — across
-        // to the edge and down to its row — is one animation rather than a
-        // jump followed by a slide.
+        // The settled row rides in on the source frame, so the whole move —
+        // across to the edge and down to its row — is one animation, and a
+        // restack landing mid-flight still computes against where the shelf is
+        // going rather than where it currently happens to be.
         var source = panel.frame
-        if let collapseAnchorY { source.origin.y = collapseAnchorY }
+        if let collapseRow { source.origin.y = collapseRow }
         setFrame(
             ShelfWindowGeometry.collapsed(
                 source,
@@ -1479,6 +1487,12 @@ final class ShelfController {
            let edge = model.collapseEdge,
            !model.isPeeking,
            let visible = collapseDisplayFrame(fallback: frame) {
+            // Grow from the settled row rather than from wherever the window
+            // currently is, and record where that leaves it.
+            if let collapseRow {
+                frame.origin.y = collapseRow + (panel.frame.height - height)
+            }
+            collapseRow = frame.origin.y
             setFrame(
                 ShelfWindowGeometry.collapsed(
                     frame,
