@@ -321,6 +321,31 @@ enum ShelfEdge: String, Codable, CaseIterable, Identifiable {
 
 /// A shelf pushed aside. Docked leaves a small tab; retracted leaves enough of
 /// the contents visible to identify the shelf.
+/// Which edge a shelf moves aside to when it does so on its own.
+enum ShelfCollapseEdge: String, Codable, CaseIterable, Identifiable {
+    case nearest
+    case left
+    case right
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .nearest: return "Nearest Edge"
+        case .left: return "Left Edge"
+        case .right: return "Right Edge"
+        }
+    }
+
+    var edge: ShelfEdge? {
+        switch self {
+        case .nearest: return nil
+        case .left: return .left
+        case .right: return .right
+        }
+    }
+}
+
 enum ShelfCollapse: String, Codable, CaseIterable {
     case docked
     case retracted

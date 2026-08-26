@@ -190,9 +190,20 @@ struct ShelfPane: View {
                         .frame(width: 120)
                     }
                     Divider()
-                    row("Automatically retract", subtitle: "After its first accepted drop, a new shelf moves aside once to the nearest edge.") {
+                    row("Automatically retract", subtitle: "After its first accepted drop, a new shelf moves aside once.") {
                         Toggle("", isOn: autoRetractBinding).toggleStyle(.switch).labelsHidden()
                     }
+                    row("Move aside to", subtitle: "A shake happens wherever the pointer is, so “nearest” sends every shelf somewhere different. A settled edge stacks them together.") {
+                        Picker("", selection: autoRetractEdgeBinding) {
+                            ForEach(ShelfCollapseEdge.allCases) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 150)
+                    }
+                    .disabled(!state.shelfAutoRetract)
+
+                    Divider()
+
                     row("Snap into place", subtitle: "Aligns a shelf to display edges and other shelves after you move it. Hold ⌘ during that move to suppress snapping.") {
                         Toggle("", isOn: snapBinding).toggleStyle(.switch).labelsHidden()
                     }
@@ -207,6 +218,34 @@ struct ShelfPane: View {
                         .frame(width: 150)
                     }
                     Divider()
+                    row("Save action output in", subtitle: "Where Compress, Convert, Resize, Remove Metadata and Merge to PDF write. Convert and Resize can override it for one run.") {
+                        HStack(spacing: 6) {
+                            Text(outputFolderLabel)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                            Button("Choose…") { chooseOutputFolder() }
+                                .controlSize(.small)
+                            if !state.shelfOutputFolder.isEmpty {
+                                Button("Reset") { state.shelfOutputFolder = "" }
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    row("Show output in", subtitle: nil) {
+                        Picker("", selection: outputRevealBinding) {
+                            ForEach(ShelfOutputReveal.allCases) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 150)
+                    }
+
+                    Divider()
+
                     row("Close shelf after dragging out", subtitle: nil) {
                         Picker("", selection: closeBehaviorBinding) {
                             ForEach(ShelfCloseBehavior.allCases) { Text($0.title).tag($0) }
@@ -446,6 +485,31 @@ struct ShelfPane: View {
             state.shelfColorLabels = $0
             manager.setColorLabels($0)
         })
+    }
+
+    private var autoRetractEdgeBinding: Binding<ShelfCollapseEdge> {
+        Binding(get: { state.shelfAutoRetractEdge }, set: { state.shelfAutoRetractEdge = $0 })
+    }
+
+    private var outputRevealBinding: Binding<ShelfOutputReveal> {
+        Binding(get: { state.shelfOutputReveal }, set: { state.shelfOutputReveal = $0 })
+    }
+
+    private var outputFolderLabel: String {
+        let path = state.shelfOutputFolder
+        guard !path.isEmpty else { return "OneBar's output folder" }
+        return URL(filePath: path).lastPathComponent
+    }
+
+    private func chooseOutputFolder() {
+        let picker = NSOpenPanel()
+        picker.canChooseDirectories = true
+        picker.canChooseFiles = false
+        picker.allowsMultipleSelection = false
+        picker.prompt = "Choose"
+        picker.message = "Where should action output be saved?"
+        guard picker.runModal() == .OK, let url = picker.url else { return }
+        state.shelfOutputFolder = url.path
     }
 
     private var takesFocusBinding: Binding<Bool> {

@@ -53,14 +53,14 @@ enum ShelfActionRunner {
         case .compress:
             let urls = subject.fileURLs
             let folder = defaultFolder
-            produce(in: controller, activity: "Compressing…", success: "Compressed") {
-                [try await ShelfTransforms.compress(urls, in: folder)]
+            produce(in: controller, activity: "Compressing…", success: "Compressed") { report in
+                [try await ShelfTransforms.compress(urls, in: folder, progress: report)]
             }
         case .removeMetadata:
             let urls = subject.imageURLs
             let folder = defaultFolder
-            produce(in: controller, activity: "Stripping…", success: "Metadata removed") {
-                try await ShelfTransforms.removeMetadata(urls, in: folder)
+            produce(in: controller, activity: "Stripping…", success: "Metadata removed") { report in
+                try await ShelfTransforms.removeMetadata(urls, in: folder, progress: report)
             }
         case .getInfo:
             showInfo(subject.items, from: controller)
@@ -73,8 +73,8 @@ enum ShelfActionRunner {
         case .mergePDF:
             let urls = subject.printableURLs
             let folder = defaultFolder
-            produce(in: controller, activity: "Merging…", success: "Merged to PDF") {
-                [try await ShelfTransforms.mergePDF(urls, in: folder)]
+            produce(in: controller, activity: "Merging…", success: "Merged to PDF") { report in
+                [try await ShelfTransforms.mergePDF(urls, in: folder, progress: report)]
             }
         case .moveToTrash:
             trash(subject, in: controller)
@@ -235,8 +235,8 @@ enum ShelfActionRunner {
             activity: "Converting…",
             success: "Converted",
             reveal: request.reveal
-        ) {
-            try await ShelfTransforms.convert(request)
+        ) { report in
+            try await ShelfTransforms.convert(request, progress: report)
         }
     }
 
@@ -275,7 +275,7 @@ enum ShelfActionRunner {
         activity: String,
         success: String,
         reveal: ShelfOutputReveal? = nil,
-        work: @escaping @Sendable () async throws -> [URL]
+        work: @escaping @Sendable (@escaping ShelfProgressReport) async throws -> [URL]
     ) {
         let reveal = reveal ?? AppState.shared.shelfOutputReveal
         switch controller.beginActivity(activity) {
@@ -288,6 +288,15 @@ enum ShelfActionRunner {
             HUD.show("That shelf has closed", symbol: "tray")
             return
         }
+        // Reports arrive off the main actor, so each one hops back before it
+        // touches the panel's observable state.
+        let report: ShelfProgressReport = { completed, total, detail in
+            Task { @MainActor in
+                ShelfProgressPanel.shared.report(
+                    completed: completed, total: total, detail: detail
+                )
+            }
+        }
         let task = Task { @MainActor in
             defer { controller.endActivity() }
             do {
@@ -296,9 +305,10 @@ enum ShelfActionRunner {
                 // would not have reached the work at all, so Stop would have
                 // cleared the footer while the run carried on. `work` is
                 // nonisolated, so it leaves the main actor on its own.
-                let produced = try await work()
+                let produced = try await work(report)
                 guard controller.isActive, !Task.isCancelled else { return }
                 guard !produced.isEmpty else {
+                    ShelfProgressPanel.shared.dismiss()
                     HUD.show("Nothing was produced", symbol: "exclamationmark.triangle")
                     return
                 }
@@ -308,8 +318,9 @@ enum ShelfActionRunner {
                 if reveal.revealsInFinder {
                     NSWorkspace.shared.activateFileViewerSelecting(produced)
                 }
-                HUD.show(success, symbol: "checkmark.circle.fill")
+                ShelfProgressPanel.shared.finish(success)
             } catch {
+                ShelfProgressPanel.shared.dismiss()
                 guard controller.isActive, !Task.isCancelled else { return }
                 HUD.show(
                     (error as? ShelfTransformError)?.errorDescription ?? "The action failed",
@@ -318,6 +329,10 @@ enum ShelfActionRunner {
             }
         }
         controller.registerActivity(task)
+        ShelfProgressPanel.shared.begin(
+            title: activity,
+            near: controller.anchorView?.window
+        ) { controller.cancelActivity() }
     }
 
     // MARK: - Sharing

@@ -260,6 +260,15 @@ final class AppState {
         didSet { UserDefaults.standard.set(shelfAutoRetract, forKey: "shelfAutoRetract") }
     }
 
+    /// Where an automatic retract sends a shelf. Nearest is where it lands
+    /// otherwise, which depends on where the shake happened and so is never
+    /// twice the same place.
+    var shelfAutoRetractEdge: ShelfCollapseEdge {
+        didSet {
+            UserDefaults.standard.set(shelfAutoRetractEdge.rawValue, forKey: "shelfAutoRetractEdge")
+        }
+    }
+
     /// Align a shelf to display edges and nearby shelves after a user drag.
     var shelfSnap: Bool {
         didSet { UserDefaults.standard.set(shelfSnap, forKey: "shelfSnap") }
@@ -375,6 +384,7 @@ final class AppState {
             "shelfTakesFocus": false,
             "shelfLayout": "grid",
             "shelfAutoRetract": false,
+            "shelfAutoRetractEdge": "right",
             "shelfSnap": true,
             "shelfDoubleClick": "dock",
             "shelfKeepInSpace": false,
@@ -434,6 +444,9 @@ final class AppState {
         shelfTakesFocus = defaults.bool(forKey: "shelfTakesFocus")
         shelfLayout = ShelfLayout(rawValue: defaults.string(forKey: "shelfLayout") ?? "") ?? .grid
         shelfAutoRetract = defaults.bool(forKey: "shelfAutoRetract")
+        shelfAutoRetractEdge = ShelfCollapseEdge(
+            rawValue: defaults.string(forKey: "shelfAutoRetractEdge") ?? ""
+        ) ?? .right
         shelfSnap = defaults.bool(forKey: "shelfSnap")
         shelfDoubleClick = ShelfDoubleClickAction(
             rawValue: defaults.string(forKey: "shelfDoubleClick") ?? ""

@@ -3,6 +3,10 @@ import ImageIO
 import PDFKit
 import UniformTypeIdentifiers
 
+/// How a running transform says where it has got to. `total` of zero means
+/// there is no honest fraction to report.
+typealias ShelfProgressReport = @Sendable (_ completed: Int, _ total: Int, _ detail: String?) -> Void
+
 enum ShelfTransformError: LocalizedError {
     case noOutputLocation
     case unreadable(URL)
@@ -32,7 +36,8 @@ enum ShelfTransforms {
     static func compress(
         _ urls: [URL],
         in folder: URL? = nil,
-        store: ShelfStore = .shared
+        store: ShelfStore = .shared,
+        progress: ShelfProgressReport? = nil
     ) async throws -> URL {
         guard let first = urls.first else { throw ShelfTransformError.unreadable(URL(filePath: "/")) }
 
@@ -73,6 +78,8 @@ enum ShelfTransforms {
         }
         defer { if let staging { try? FileManager.default.removeItem(at: staging) } }
 
+        // No fraction: ditto says nothing about how far in it is.
+        progress?(0, 0, urls.count == 1 ? first.lastPathComponent : "\(urls.count) items")
         let status = try await runTool(
             URL(filePath: "/usr/bin/ditto"),
             ["-c", "-k", "--sequesterRsrc", "--keepParent", source.path, destination.path]
@@ -144,10 +151,15 @@ enum ShelfTransforms {
 
     // MARK: - Images
 
-    static func convert(_ request: ImageActionRequest, store: ShelfStore = .shared) async throws -> [URL] {
+    static func convert(
+        _ request: ImageActionRequest,
+        store: ShelfStore = .shared,
+        progress: ShelfProgressReport? = nil
+    ) async throws -> [URL] {
         var written: [URL] = []
-        for url in request.urls {
+        for (index, url) in request.urls.enumerated() {
             try Task.checkCancellation()
+            progress?(index, request.urls.count, url.lastPathComponent)
             if let output = try await convertOne(url, request: request, store: store) {
                 written.append(output)
             }
@@ -263,11 +275,13 @@ enum ShelfTransforms {
     static func removeMetadata(
         _ urls: [URL],
         in folder: URL? = nil,
-        store: ShelfStore = .shared
+        store: ShelfStore = .shared,
+        progress: ShelfProgressReport? = nil
     ) async throws -> [URL] {
         var written: [URL] = []
-        for url in urls {
+        for (index, url) in urls.enumerated() {
             try Task.checkCancellation()
+            progress?(index, urls.count, url.lastPathComponent)
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   CGImageSourceGetCount(source) > 0,
                   let identifier = CGImageSourceGetType(source)
@@ -310,10 +324,13 @@ enum ShelfTransforms {
     static func mergePDF(
         _ urls: [URL],
         in folder: URL? = nil,
-        store: ShelfStore = .shared
+        store: ShelfStore = .shared,
+        progress: ShelfProgressReport? = nil
     ) async throws -> URL {
         let merged = PDFDocument()
-        for url in urls {
+        for (index, url) in urls.enumerated() {
+            try Task.checkCancellation()
+            progress?(index, urls.count, url.lastPathComponent)
             if let document = PDFDocument(url: url) {
                 for index in 0..<document.pageCount {
                     guard let page = document.page(at: index) else { continue }

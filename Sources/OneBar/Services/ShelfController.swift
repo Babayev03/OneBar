@@ -560,7 +560,9 @@ final class ShelfController {
             autoRetractTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(350))
                 guard let self, self.isActive, self.model.collapse == nil else { return }
-                self.retract()
+                // A settled edge, not the nearest one: a shake happens wherever
+                // the pointer is, so "nearest" put every shelf somewhere else.
+                self.retract(to: AppState.shared.shelfAutoRetractEdge.edge)
             }
         }
         return accepted
@@ -816,6 +818,7 @@ final class ShelfController {
     }
 
     func cancelActivity() {
+        guard activityTask != nil || model.activity != nil else { return }
         activityTask?.cancel()
         activityTask = nil
         model.activity = nil
