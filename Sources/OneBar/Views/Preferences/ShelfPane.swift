@@ -606,7 +606,6 @@ struct ShelfPane: View {
         previewModel.actions = instantActions
         previewModel.color = AppState.shared.accentColor
         previewModel.forcesAvailable = true
-        previewModel.isPresented = true
     }
 
     private func row<Control: View>(

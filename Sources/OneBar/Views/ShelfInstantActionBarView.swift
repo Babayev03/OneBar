@@ -34,8 +34,6 @@ struct ShelfInstantActionBarView: View {
                 .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .opacity(model.isPresented ? 1 : 0)
-        .scaleEffect(model.isPresented ? 1 : 0.94, anchor: .top)
     }
 
     private func cell(

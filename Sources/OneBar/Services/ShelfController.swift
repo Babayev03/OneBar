@@ -101,7 +101,15 @@ final class ShelfController {
     /// only while that shelf is still empty and the drag that summoned it is
     /// still in the user's hand.
     private var instantActionBar: ShelfInstantActionBar?
+    private var instantActionShowTask: Task<Void, Never>?
     private var instantActionDismissTask: Task<Void, Never>?
+    /// True only for a shelf a shake summoned that has not yet accepted a drop.
+    ///
+    /// It is what tells an instant action whether the shelf it just ran on is
+    /// the user's or a container made for this one drag — the difference
+    /// between closing an empty shelf that was never asked for and closing one
+    /// somebody put at the edge on purpose.
+    private(set) var isTransient = false
     private var draggedOut: [ShelfItem] = []
     private var internalTransfer: (operation: ShelfTransferOperation, itemIDs: Set<UUID>)?
     private var userMoveCandidate = false
@@ -205,10 +213,12 @@ final class ShelfController {
             model.isPresented = true
         }
         // A shake is the only route that leaves a drag in flight over an empty
-        // shelf, and so the only one where a button could catch it: a notch
-        // drop has already consumed the drag by the time its shelf appears.
+        // shelf, and so the only one where the strip can be up before the shelf
+        // has been hovered: a notch drop has already consumed the drag by the
+        // time its shelf appears.
         if placedAtCursor, focus == .afterFirstDrop {
-            instantActionBar = ShelfInstantActionBar(controller: self, parent: panel)
+            isTransient = true
+            showInstantActionBar(delayed: false)
         }
         installKeyMonitor()
         installClickMonitor()
@@ -546,8 +556,10 @@ final class ShelfController {
             return []
         }
         // The drop landed on the shelf rather than on a button, so the shelf is
-        // no longer the empty one the strip was offered for.
+        // no longer the empty one the strip was offered for — and no longer
+        // something an instant action may close.
         dismissInstantActionBar()
+        isTransient = false
         let wasEmpty = model.items.isEmpty
         let resolution = ShelfTransferLogic.resolve(incoming: incoming, existing: model.items)
         let accepted = resolution.accepted
@@ -695,23 +707,67 @@ final class ShelfController {
 
     /// Called by the manager, which owns the lifetime — and which decides
     /// whether the items are kept, so nothing is deleted here.
-    /// The drag that summoned this shelf has been released.
+    /// Puts the action strip up under this shelf.
     ///
+    /// `delayed` for a shelf a drag has just entered: it holds the strip back
+    /// until a drag merely passing over has gone, and — the load-bearing half —
+    /// until a shelf peeking out from the edge has finished sliding. The strip
+    /// is a child window, so it keeps whatever offset it is given for as long
+    /// as it lives; one placed against a frame the shelf is still travelling
+    /// through would keep that wrong offset after the slide had ended.
+    func showInstantActionBar(delayed: Bool) {
+        instantActionDismissTask?.cancel()
+        instantActionDismissTask = nil
+        guard isActive, instantActionBar == nil else { return }
+        guard delayed else {
+            instantActionShowTask?.cancel()
+            instantActionShowTask = nil
+            guard let panel else { return }
+            instantActionBar = ShelfInstantActionBar(controller: self, parent: panel)
+            return
+        }
+        guard instantActionShowTask == nil else { return }
+        instantActionShowTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(240))
+            guard !Task.isCancelled, let self else { return }
+            self.instantActionShowTask = nil
+            self.showInstantActionBar(delayed: false)
+        }
+    }
+
+    /// The drag moved from the shelf onto the strip, or back. Both are outside
+    /// the other's window, so each one leaving would otherwise take the strip
+    /// down and slide the shelf back under a drag that was aiming at a button.
+    func holdInstantActionBar() {
+        instantActionDismissTask?.cancel()
+        instantActionDismissTask = nil
+    }
+
     /// Held open for a beat rather than taken down at once, because AppKit
     /// routes the drop to its destination on the same mouse-up that ends the
     /// session: closing the window when the button is released would throw away
-    /// the very drop the strip exists to catch.
-    func dragSessionEnded() {
+    /// the very drop the strip exists to catch. The same delay covers the gap
+    /// the pointer crosses between the shelf and the strip.
+    func dismissInstantActionBarAfterDelay(milliseconds: Int = 250) {
+        instantActionShowTask?.cancel()
+        instantActionShowTask = nil
         guard instantActionBar != nil else { return }
         instantActionDismissTask?.cancel()
         instantActionDismissTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: .milliseconds(milliseconds))
             guard !Task.isCancelled else { return }
             self?.dismissInstantActionBar()
         }
     }
 
+    /// The drag that summoned this shelf has been released.
+    func dragSessionEnded() {
+        dismissInstantActionBarAfterDelay()
+    }
+
     func dismissInstantActionBar() {
+        instantActionShowTask?.cancel()
+        instantActionShowTask = nil
         instantActionDismissTask?.cancel()
         instantActionDismissTask = nil
         instantActionBar?.dismiss()

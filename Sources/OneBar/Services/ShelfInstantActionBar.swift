@@ -10,7 +10,6 @@ final class ShelfInstantActionBarModel {
     /// before the pointer ever reaches it.
     var preview = ShelfDragPreview()
     var highlighted: Int?
-    var isPresented = false
     /// The shelf's own indicator colour, so the strip reads as belonging to it.
     var color: Color = .accentColor
 
@@ -80,21 +79,34 @@ final class ShelfInstantActionBar {
         drop.addSubview(hosting)
         panel.contentView = drop
 
-        panel.setFrame(
-            ShelfWindowGeometry.instantActionBarFrame(
-                size: size,
-                shelfFrame: parent.frame,
-                in: visible
-            ),
-            display: false
+        let target = ShelfWindowGeometry.instantActionBarFrame(
+            size: size,
+            shelfFrame: parent.frame,
+            in: visible
         )
+        // Slides down into place from behind the shelf rather than scaling up.
+        // Done to the window instead of to the SwiftUI content, which fills the
+        // window exactly — an offset there would have to slide the tiles out
+        // through the top edge of their own window, and be clipped doing it.
+        var start = target
+        start.origin.y += Self.slideDistance
+        panel.setFrame(start, display: false)
+        panel.alphaValue = 0
         self.panel = panel
         parent.addChildWindow(panel, ordered: .above)
         panel.orderFrontRegardless()
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-            model.isPresented = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+            panel.animator().setFrame(target, display: true)
         }
     }
+
+    /// How far above its resting place the strip starts. Enough to read as
+    /// movement against a 90pt-tall row without travelling far enough to look
+    /// like it came from somewhere else.
+    private static let slideDistance: CGFloat = 12
 
     // MARK: - Lifetime
 
@@ -133,6 +145,20 @@ final class ShelfInstantActionBar {
         model.highlighted = nil
     }
 
+    /// The drag has arrived on the strip. It has left the shelf's own window to
+    /// get here, so without this the shelf would slide back to the edge and the
+    /// strip would be dismissed out from under a drag aimed at a button.
+    func holdOpen() {
+        controller?.holdInstantActionBar()
+        controller?.peek(true)
+    }
+
+    func releaseHold() {
+        model.highlighted = nil
+        controller?.dismissInstantActionBarAfterDelay()
+        controller?.peekAfterDelay()
+    }
+
     func perform(at point: NSPoint, info: NSDraggingInfo) -> Bool {
         model.highlighted = nil
         guard let index = ShelfInstantActionLayout.index(at: point, count: model.actions.count),
@@ -164,19 +190,21 @@ final class ShelfInstantActionDropView: NSView {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        operation(for: sender)
+        bar?.holdOpen()
+        return operation(for: sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        operation(for: sender)
+        bar?.holdOpen()
+        return operation(for: sender)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        bar?.clearHighlight()
+        bar?.releaseHold()
     }
 
     override func draggingEnded(_ sender: NSDraggingInfo) {
-        bar?.clearHighlight()
+        bar?.releaseHold()
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {

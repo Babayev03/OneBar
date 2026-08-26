@@ -93,15 +93,19 @@ enum ShelfInstantActionRunner {
         }
     }
 
-    /// The shelf goes away exactly when it has nothing to show for the action.
+    /// The shelf goes away exactly when it was made for this drag and has
+    /// nothing to show for the action.
     ///
     /// It cannot close any earlier: it hosts the progress window and Stop for
-    /// the whole run. And it must not close when the output rule is "Shelf",
+    /// the whole run. It must not close when the output rule is "Shelf",
     /// because the result is then sitting on it — checking the items rather
     /// than re-reading the preference also covers an action that produced
-    /// nothing, and one the user stopped.
+    /// nothing, and one the user stopped. And it must never close a shelf the
+    /// user already had: the strip is offered on any shelf a drag hovers, and
+    /// running an action from one parked at the edge must leave it parked.
     private static func closeIfNothingLanded(_ controller: ShelfController) {
-        guard controller.isActive, controller.model.items.isEmpty else { return }
+        guard controller.isActive, controller.isTransient, controller.model.items.isEmpty
+        else { return }
         ShelfManager.shared.close(controller)
     }
 }

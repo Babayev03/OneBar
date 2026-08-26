@@ -33,24 +33,43 @@ final class ShelfDropView: NSView {
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let operation = operation(for: sender)
         controller?.model.isDropTargeted = !operation.isEmpty
-        if !operation.isEmpty { controller?.peek(true) }
+        if !operation.isEmpty {
+            controller?.peek(true)
+            offerInstantActions(for: sender)
+        }
         return operation
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         let operation = operation(for: sender)
         controller?.model.isDropTargeted = !operation.isEmpty
+        if !operation.isEmpty { offerInstantActions(for: sender) }
         return operation
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         controller?.model.isDropTargeted = false
         controller?.peekAfterDelay()
+        controller?.dismissInstantActionBarAfterDelay()
     }
 
     override func draggingEnded(_ sender: NSDraggingInfo) {
         controller?.model.isDropTargeted = false
         controller?.peekAfterDelay()
+        controller?.dismissInstantActionBarAfterDelay()
+    }
+
+    /// Any shelf a drag hovers offers its actions, not only one a shake just
+    /// made — a shelf already at the edge is the one you were reaching for
+    /// anyway, and shaking to summon a second one to hold the same buttons is
+    /// work the shelf can save you.
+    ///
+    /// Never for a drag out of one of our own shelves: that is a transfer
+    /// between shelves, and the buttons would be answering a question the user
+    /// did not ask.
+    private func offerInstantActions(for sender: NSDraggingInfo) {
+        guard !(sender.draggingSource is ShelfDragSourceView) else { return }
+        controller?.showInstantActionBar(delayed: true)
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
