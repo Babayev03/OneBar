@@ -24,8 +24,34 @@ enum ShelfActionRunner {
         in controller: ShelfController,
         anchoredTo view: NSView? = nil
     ) {
-        let subject = subject(for: scope, in: controller)
-        guard action.isAvailable(for: subject) else { return }
+        perform(
+            action,
+            on: subject(for: scope, in: controller),
+            in: controller,
+            anchoredTo: view
+        )
+    }
+
+    /// The same actions against items chosen by the caller rather than by the
+    /// shelf's own selection. An instant action runs this way: what it acts on
+    /// came off a drag and was never put on the shelf at all.
+    ///
+    /// `onFinish` runs once the action is done — after the work for the ones
+    /// that write a file, immediately for the ones that do not.
+    static func perform(
+        _ action: ShelfAction,
+        on subject: ShelfActionSubject,
+        in controller: ShelfController,
+        anchoredTo view: NSView? = nil,
+        onFinish: (@MainActor () -> Void)? = nil
+    ) {
+        guard action.isAvailable(for: subject) else {
+            onFinish?()
+            return
+        }
+        // Set by the branches that hand `onFinish` to `produce`, so it is not
+        // also called here while the work is still running.
+        var deferred = false
 
         switch action {
         case .open:
@@ -38,8 +64,7 @@ enum ShelfActionRunner {
         case .showInFinder:
             NSWorkspace.shared.activateFileViewerSelecting(subject.fileURLs)
         case .rename:
-            guard let item = subject.items.first else { return }
-            controller.beginRename(item.id)
+            if let item = subject.items.first { controller.beginRename(item.id) }
         case .copy:
             controller.copySelection()
         case .addFromClipboard:
@@ -53,13 +78,25 @@ enum ShelfActionRunner {
         case .compress:
             let urls = subject.fileURLs
             let folder = defaultFolder
-            produce(in: controller, activity: "Compressing…", success: "Compressed") { report in
+            deferred = true
+            produce(
+                in: controller,
+                activity: "Compressing…",
+                success: "Compressed",
+                onFinish: onFinish
+            ) { report in
                 [try await ShelfTransforms.compress(urls, in: folder, progress: report)]
             }
         case .removeMetadata:
             let urls = subject.imageURLs
             let folder = defaultFolder
-            produce(in: controller, activity: "Stripping…", success: "Metadata removed") { report in
+            deferred = true
+            produce(
+                in: controller,
+                activity: "Stripping…",
+                success: "Metadata removed",
+                onFinish: onFinish
+            ) { report in
                 try await ShelfTransforms.removeMetadata(urls, in: folder, progress: report)
             }
         case .getInfo:
@@ -73,7 +110,13 @@ enum ShelfActionRunner {
         case .mergePDF:
             let urls = subject.printableURLs
             let folder = defaultFolder
-            produce(in: controller, activity: "Merging…", success: "Merged to PDF") { report in
+            deferred = true
+            produce(
+                in: controller,
+                activity: "Merging…",
+                success: "Merged to PDF",
+                onFinish: onFinish
+            ) { report in
                 [try await ShelfTransforms.mergePDF(urls, in: folder, progress: report)]
             }
         case .moveToTrash:
@@ -83,6 +126,8 @@ enum ShelfActionRunner {
         case .clearShelf:
             controller.clear()
         }
+
+        if !deferred { onFinish?() }
     }
 
     // MARK: - Opening
@@ -231,13 +276,21 @@ enum ShelfActionRunner {
     }
 
     /// Runs a preset straight from the menu.
-    static func convertImages(_ request: ImageActionRequest, in controller: ShelfController) {
-        guard !request.urls.isEmpty else { return }
+    static func convertImages(
+        _ request: ImageActionRequest,
+        in controller: ShelfController,
+        onFinish: (@MainActor () -> Void)? = nil
+    ) {
+        guard !request.urls.isEmpty else {
+            onFinish?()
+            return
+        }
         produce(
             in: controller,
             activity: "Converting…",
             success: "Converted",
-            reveal: request.reveal
+            reveal: request.reveal,
+            onFinish: onFinish
         ) { report in
             try await ShelfTransforms.convert(request, progress: report)
         }
@@ -278,6 +331,7 @@ enum ShelfActionRunner {
         activity: String,
         success: String,
         reveal: ShelfOutputReveal? = nil,
+        onFinish: (@MainActor () -> Void)? = nil,
         work: @escaping @Sendable (@escaping ShelfProgressReport) async throws -> [URL]
     ) {
         let reveal = reveal ?? AppState.shared.shelfOutputReveal
@@ -286,9 +340,11 @@ enum ShelfActionRunner {
             break
         case .busy:
             HUD.show("Still working on the last action", symbol: "hourglass")
+            onFinish?()
             return
         case .gone:
             HUD.show("That shelf has closed", symbol: "tray")
+            onFinish?()
             return
         }
         // Reports arrive off the main actor, so each one hops back before it
@@ -301,7 +357,13 @@ enum ShelfActionRunner {
             }
         }
         let task = Task { @MainActor in
-            defer { controller.endActivity() }
+            defer {
+                controller.endActivity()
+                // Every exit path, cancellation included: the caller may have a
+                // window to close, and leaving it up after a stopped run would
+                // read as the action still going.
+                onFinish?()
+            }
             do {
                 // Called directly rather than through `Task.detached`, which is
                 // deliberately independent of its parent: cancelling this task

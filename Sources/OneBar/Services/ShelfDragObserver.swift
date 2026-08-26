@@ -119,6 +119,7 @@ final class ShelfDragObserver {
         isDragSession = false
         ShakeDetector.shared.dragEnded()
         NotchDropController.shared.dragEnded()
+        ShelfManager.shared.dragSessionEnded()
     }
 
     private func isFrontmostAppIgnored() -> Bool {

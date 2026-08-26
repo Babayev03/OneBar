@@ -302,6 +302,18 @@ final class AppState {
         didSet { UserDefaults.standard.set(shelfNotchHighlight.rawValue, forKey: "shelfNotchHighlight") }
     }
 
+    /// Show a row of action buttons under a shelf summoned mid-drag, so a drop
+    /// can go straight to an action instead of onto the shelf.
+    var shelfInstantActions: Bool {
+        didSet { UserDefaults.standard.set(shelfInstantActions, forKey: "shelfInstantActions") }
+    }
+
+    /// Which buttons the strip shows, in order. Stored as ids rather than
+    /// titles so a reworded action keeps the button the user put there.
+    var shelfInstantActionIDs: [String] {
+        didSet { UserDefaults.standard.set(shelfInstantActionIDs, forKey: "shelfInstantActionIDs") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -392,7 +404,9 @@ final class AppState {
             "shelfNotchDrop": true,
             "shelfNotchHighlight": "onHover",
             "shelfOutputFolder": "",
-            "shelfOutputReveal": "shelf"
+            "shelfOutputReveal": "shelf",
+            "shelfInstantActions": true,
+            "shelfInstantActionIDs": ShelfInstantAction.defaultIDs
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
         clipboardEnabled = defaults.bool(forKey: "clipboardEnabled")
@@ -461,5 +475,8 @@ final class AppState {
         shelfNotchHighlight = NotchHighlight(
             rawValue: defaults.string(forKey: "shelfNotchHighlight") ?? ""
         ) ?? .onHover
+        shelfInstantActions = defaults.bool(forKey: "shelfInstantActions")
+        shelfInstantActionIDs = defaults.stringArray(forKey: "shelfInstantActionIDs")
+            ?? ShelfInstantAction.defaultIDs
     }
 }

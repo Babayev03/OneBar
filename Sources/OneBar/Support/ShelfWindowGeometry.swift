@@ -182,6 +182,28 @@ enum ShelfWindowGeometry {
         return result
     }
 
+    /// Where the instant-action strip sits relative to its shelf.
+    ///
+    /// Beneath by default, since that is the direction the drag is already
+    /// travelling. A shelf shaken up near the bottom of the screen has no room
+    /// there, and a strip clamped into the last few points would sit on top of
+    /// the shelf it belongs to, so it flips above instead.
+    static func instantActionBarFrame(
+        size: NSSize,
+        shelfFrame: NSRect,
+        in visible: NSRect,
+        gap: CGFloat = ShelfInstantActionLayout.gap
+    ) -> NSRect {
+        var origin = NSPoint(
+            x: shelfFrame.midX - size.width / 2,
+            y: shelfFrame.minY - gap - size.height
+        )
+        if origin.y < visible.minY + margin {
+            origin.y = shelfFrame.maxY + gap
+        }
+        return clamped(NSRect(origin: origin, size: size), to: visible)
+    }
+
     /// Finds the closest free placement to the requested location. Candidates
     /// sit beside the edges of existing shelves, which naturally makes top-
     /// corner notch shelves cascade downward before starting another column.

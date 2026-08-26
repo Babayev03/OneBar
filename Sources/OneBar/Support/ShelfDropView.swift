@@ -136,13 +136,23 @@ extension ShelfDropView: QLPreviewPanelDataSource, QLPreviewPanelDelegate {
 enum ShelfItemReader {
     /// `completion` runs on the main actor, possibly more than once: promised
     /// files arrive after the drop has already been accepted.
-    static func read(from info: NSDraggingInfo, completion: @escaping @MainActor ([ShelfItem]) -> Void) {
+    ///
+    /// `finished` runs once, after the last of them. A shelf does not need it —
+    /// items can be added as they arrive — but an instant action does: acting
+    /// on each delivery separately would compress a five-file drag into five
+    /// separate archives.
+    static func read(
+        from info: NSDraggingInfo,
+        completion: @escaping @MainActor ([ShelfItem]) -> Void,
+        finished: (@MainActor () -> Void)? = nil
+    ) {
         let pasteboard = info.draggingPasteboard
 
         // File URLs first: they are the common case and the only kind that can
         // be referenced rather than copied.
         if let items = fileItems(from: pasteboard) {
             completion(items)
+            finished?()
             return
         }
 
@@ -152,11 +162,12 @@ enum ShelfItemReader {
             forClasses: [NSFilePromiseReceiver.self],
             options: nil
         ) as? [NSFilePromiseReceiver], !receivers.isEmpty {
-            receivePromises(receivers, completion: completion)
+            receivePromises(receivers, completion: completion, finished: finished)
             return
         }
 
         read(from: pasteboard, completion: completion)
+        finished?()
     }
 
     /// The equivalent reader for Add/New From Clipboard, where file promises
@@ -204,10 +215,12 @@ enum ShelfItemReader {
 
     private static func receivePromises(
         _ receivers: [NSFilePromiseReceiver],
-        completion: @escaping @MainActor ([ShelfItem]) -> Void
+        completion: @escaping @MainActor ([ShelfItem]) -> Void,
+        finished: (@MainActor () -> Void)? = nil
     ) {
         guard let destination = ShelfStore.shared.promiseDestination() else {
             completion([])
+            finished?()
             return
         }
         let queue = OperationQueue()
@@ -230,6 +243,7 @@ enum ShelfItemReader {
                         if remaining == 0 {
                             promiseQueues[deliveryID] = nil
                             ShelfStore.shared.discardPromiseDestination(destination)
+                            finished?()
                         }
                     }
                     guard error == nil,

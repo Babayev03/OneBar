@@ -5,6 +5,7 @@ struct ShelfPane: View {
     private enum Section: String, CaseIterable, Identifiable {
         case activation = "Activation"
         case interaction = "Interaction"
+        case actions = "Actions"
         case shelves = "Shelves"
 
         var id: String { rawValue }
@@ -19,6 +20,9 @@ struct ShelfPane: View {
     /// Read once when the pane appears rather than on every redraw: measuring a
     /// folder walks it.
     @State private var outputFolderBytes = 0
+    /// The Preferences preview is the strip itself, so what is shown here and
+    /// what appears under a shelf cannot drift apart.
+    @State private var previewModel = ShelfInstantActionBarModel()
 
     var body: some View {
         VStack(spacing: 12) {
@@ -35,6 +39,7 @@ struct ShelfPane: View {
                     switch section {
                     case .activation: activation
                     case .interaction: interaction
+                    case .actions: actions
                     case .shelves: shelves
                     }
                 }
@@ -45,6 +50,10 @@ struct ShelfPane: View {
         .onAppear {
             refreshNotchAvailability()
             outputFolderBytes = ShelfStore.shared.outputFolderSize()
+            refreshInstantActionPreview()
+        }
+        .onChange(of: state.shelfInstantActionIDs) { _, _ in
+            refreshInstantActionPreview()
         }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didChangeScreenParametersNotification
@@ -300,6 +309,147 @@ struct ShelfPane: View {
         }
     }
 
+    // MARK: - Actions
+
+    private var actions: some View {
+        VStack(spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    row(
+                        "Show action buttons under a new shelf",
+                        subtitle: "When a shake summons a shelf in the middle of a drag, a row of buttons appears beneath it. Dropping on one runs that action straight away — the files never land on the shelf."
+                    ) {
+                        Toggle("", isOn: instantActionsBinding).toggleStyle(.switch).labelsHidden()
+                    }
+
+                    if !instantActions.isEmpty {
+                        Divider()
+                        HStack {
+                            Spacer()
+                            ShelfInstantActionBarView(model: previewModel)
+                            Spacer()
+                        }
+                        .opacity(state.shelfInstantActions ? 1 : 0.4)
+                    }
+                }
+                .padding(6)
+            } label: {
+                Text("Instant Actions")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    if instantActions.isEmpty {
+                        Text("No buttons — a shelf summoned mid-drag will appear on its own.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+                    } else {
+                        ForEach(Array(instantActions.enumerated()), id: \.element.id) { index, action in
+                            HStack(spacing: 8) {
+                                Image(systemName: action.symbol)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 18)
+                                Text(action.activityLabel)
+                                    .font(.system(size: 13))
+                                Text(action.category.title)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.tertiary)
+                                Spacer()
+                                Button {
+                                    move(from: index, to: index - 1)
+                                } label: {
+                                    Image(systemName: "chevron.up")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(index == 0)
+                                .help("Move left in the strip")
+                                Button {
+                                    move(from: index, to: index + 1)
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(index == instantActions.count - 1)
+                                .help("Move right in the strip")
+                                Button {
+                                    state.shelfInstantActionIDs.remove(at: index)
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Take this button off the strip")
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    HStack {
+                        Menu("Add Button") {
+                            ForEach(ShelfInstantAction.Category.allCases) { category in
+                                let unused = unusedInstantActions.filter { $0.category == category }
+                                if !unused.isEmpty {
+                                    SwiftUI.Section(category.title) {
+                                        ForEach(unused) { action in
+                                            Button(action.activityLabel) {
+                                                state.shelfInstantActionIDs.append(action.id)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .frame(width: 130)
+                        .disabled(
+                            unusedInstantActions.isEmpty
+                                || instantActions.count >= ShelfInstantAction.maxCount
+                        )
+                        Spacer()
+                        Button("Restore Defaults") {
+                            state.shelfInstantActionIDs = ShelfInstantAction.defaultIDs
+                        }
+                        .controlSize(.small)
+                    }
+
+                    Text("Up to \(ShelfInstantAction.maxCount) buttons. Convert Image and Resize Image themselves are not offered here — they open a dialog, and a drop that asks a question is not instant.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(6)
+            } label: {
+                Text("Buttons")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .disabled(!state.shelfEnabled)
+    }
+
+    private var instantActions: [ShelfInstantAction] {
+        ShelfInstantAction.resolve(state.shelfInstantActionIDs)
+    }
+
+    private var unusedInstantActions: [ShelfInstantAction] {
+        let used = Set(state.shelfInstantActionIDs)
+        return ShelfInstantAction.catalogue.filter { !used.contains($0.id) }
+    }
+
+    private func move(from index: Int, to destination: Int) {
+        var ids = state.shelfInstantActionIDs
+        guard ids.indices.contains(index), ids.indices.contains(destination) else { return }
+        ids.swapAt(index, destination)
+        state.shelfInstantActionIDs = ids
+    }
+
+    private var instantActionsBinding: Binding<Bool> {
+        Binding(get: { state.shelfInstantActions }, set: { state.shelfInstantActions = $0 })
+    }
+
     // MARK: - Shelves
 
     private var shelves: some View {
@@ -451,6 +601,13 @@ struct ShelfPane: View {
     }
 
     // MARK: - Layout helper
+
+    private func refreshInstantActionPreview() {
+        previewModel.actions = instantActions
+        previewModel.color = AppState.shared.accentColor
+        previewModel.forcesAvailable = true
+        previewModel.isPresented = true
+    }
 
     private func row<Control: View>(
         _ title: String,

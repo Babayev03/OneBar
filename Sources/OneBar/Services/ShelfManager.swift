@@ -156,6 +156,12 @@ final class ShelfManager {
         persist()
     }
 
+    /// A drag has been released. Each shelf that put an instant-action strip up
+    /// for it takes the strip down again.
+    func dragSessionEnded() {
+        for controller in shelves { controller.dragSessionEnded() }
+    }
+
     // MARK: - Closing
 
     func close(_ controller: ShelfController) {
