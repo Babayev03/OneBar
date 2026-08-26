@@ -63,12 +63,27 @@ final class ShelfManager {
 
     // MARK: - Opening
 
+    /// Refuses rather than closing something: a shelf holds what the user put
+    /// on it, and quietly retiring the oldest to make room for a shake would
+    /// take a decision that is theirs.
+    var isAtShelfLimit: Bool { shelves.count >= AppState.shared.shelfMaxCount }
+
+    private func refuseOverLimit() -> Bool {
+        guard isAtShelfLimit else { return false }
+        let limit = AppState.shared.shelfMaxCount
+        HUD.show(
+            limit == 1 ? "One shelf at a time" : "\(limit) shelves at a time",
+            symbol: "tray.full"
+        )
+        return true
+    }
+
     @discardableResult
     func newShelf(
         at point: NSPoint?,
         focus: ShelfFocusIntent = .immediate
     ) -> ShelfController? {
-        guard AppState.shared.shelfEnabled else { return nil }
+        guard AppState.shared.shelfEnabled, !refuseOverLimit() else { return nil }
         let controller = ShelfController(at: point, focus: focus)
         controller.model.colorSource = .automatic
         if AppState.shared.shelfColorLabels {
@@ -95,7 +110,9 @@ final class ShelfManager {
 
     @discardableResult
     func reopen(_ snapshot: ShelfSnapshot) -> ShelfController? {
-        guard AppState.shared.shelfEnabled else { return nil }
+        guard AppState.shared.shelfEnabled,
+              shelves.contains(where: { $0.id == snapshot.id }) || !refuseOverLimit()
+        else { return nil }
         let archived = ShelfArchiveLogic.take(id: snapshot.id, pinned: &pinned, recent: &recent) ?? snapshot
         let controller = open(archived, focus: .immediate)
         persist()
@@ -118,10 +135,15 @@ final class ShelfManager {
         return controller
     }
 
+    /// Anything over the limit stays pinned rather than being dropped, so it is
+    /// still listed as a closed pinned shelf and can be brought back by hand.
     private func reopenAllPinned() {
-        let snapshots = pinned
-        pinned.removeAll()
-        for snapshot in snapshots { _ = open(snapshot) }
+        let split = ShelfArchiveLogic.split(
+            pinned: pinned,
+            room: AppState.shared.shelfMaxCount - shelves.count
+        )
+        pinned = split.keptPinned
+        for snapshot in split.open { _ = open(snapshot) }
     }
 
     func setEnabled(_ enabled: Bool) {

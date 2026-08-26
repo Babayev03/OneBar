@@ -41,4 +41,17 @@ enum ShelfArchiveLogic {
         }
         return nil
     }
+
+    /// Splits the pinned list at the number of shelves there is room to open.
+    ///
+    /// The remainder stays pinned rather than being dropped: a shelf the user
+    /// asked to come back must not vanish because the limit happened to be
+    /// lower than the number of them.
+    static func split(
+        pinned: [ShelfSnapshot],
+        room: Int
+    ) -> (open: [ShelfSnapshot], keptPinned: [ShelfSnapshot]) {
+        let room = max(0, room)
+        return (Array(pinned.prefix(room)), Array(pinned.dropFirst(room)))
+    }
 }

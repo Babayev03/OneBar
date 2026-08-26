@@ -236,3 +236,42 @@ struct ShelfLifecycleTests {
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 }
+
+@Suite("Shelf limit")
+struct ShelfLimitTests {
+    private func snapshots(_ count: Int) -> [ShelfSnapshot] {
+        (0..<count).map { _ in ShelfSnapshot(id: UUID(), isPinned: true) }
+    }
+
+    @Test("Only what fits is opened, and the rest stays pinned")
+    func splitsAtTheLimit() {
+        let pinned = snapshots(8)
+        let split = ShelfArchiveLogic.split(pinned: pinned, room: 5)
+        #expect(split.open.count == 5)
+        #expect(split.keptPinned.count == 3)
+        // Nothing is lost: every shelf is still accounted for somewhere.
+        #expect(split.open + split.keptPinned == pinned)
+    }
+
+    @Test("No room keeps every pinned shelf pinned rather than dropping them")
+    func noRoom() {
+        let pinned = snapshots(4)
+        let split = ShelfArchiveLogic.split(pinned: pinned, room: 0)
+        #expect(split.open.isEmpty)
+        #expect(split.keptPinned == pinned)
+
+        // A limit already exceeded gives a negative room, which must not crash
+        // or be read as "open them all".
+        let negative = ShelfArchiveLogic.split(pinned: pinned, room: -3)
+        #expect(negative.open.isEmpty)
+        #expect(negative.keptPinned == pinned)
+    }
+
+    @Test("Room to spare opens everything and leaves nothing behind")
+    func roomToSpare() {
+        let pinned = snapshots(2)
+        let split = ShelfArchiveLogic.split(pinned: pinned, room: 5)
+        #expect(split.open == pinned)
+        #expect(split.keptPinned.isEmpty)
+    }
+}

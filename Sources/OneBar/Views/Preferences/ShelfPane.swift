@@ -309,14 +309,29 @@ struct ShelfPane: View {
         VStack(spacing: 14) {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
+                    row(
+                        "Maximum shelves at once",
+                        subtitle: "Note: every open shelf is a live window that redraws along with everything else on screen, and a docked one keeps watching the pointer. A lot of them at once costs frame rate. Five is a comfortable number; raise it only if you need to, and expect it to be felt."
+                    ) {
+                        HStack(spacing: 6) {
+                            Text("\(state.shelfMaxCount)")
+                                .font(.system(size: 12).monospacedDigit())
+                                .frame(width: 18, alignment: .trailing)
+                            Stepper("", value: maxCountBinding, in: 1...20)
+                                .labelsHidden()
+                        }
+                    }
+
+                    Divider()
+
                     HStack {
-                        Text("Create an empty shelf at the default location.")
+                        Text(shelfCountSummary)
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button("New Shelf") { manager.newShelf(at: nil) }
                             .controlSize(.small)
-                            .disabled(!state.shelfEnabled)
+                            .disabled(!state.shelfEnabled || manager.isAtShelfLimit)
                     }
                     Divider()
                     if manager.shelves.isEmpty {
@@ -529,6 +544,17 @@ struct ShelfPane: View {
             removed == 1 ? "Removed 1 file" : "Removed \(removed) files",
             symbol: "trash"
         )
+    }
+
+    private var shelfCountSummary: String {
+        let open = manager.shelves.count
+        let limit = state.shelfMaxCount
+        guard open < limit else { return "All \(limit) shelves are open." }
+        return "\(open) of \(limit) open. Create an empty shelf at the default location."
+    }
+
+    private var maxCountBinding: Binding<Int> {
+        Binding(get: { state.shelfMaxCount }, set: { state.shelfMaxCount = max(1, $0) })
     }
 
     private var autoRetractEdgeBinding: Binding<ShelfCollapseEdge> {

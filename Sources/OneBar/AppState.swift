@@ -260,6 +260,13 @@ final class AppState {
         didSet { UserDefaults.standard.set(shelfAutoRetract, forKey: "shelfAutoRetract") }
     }
 
+    /// How many shelves may be open at once. Each one is a live window that
+    /// redraws with everything else on screen, so a large number of them is
+    /// felt rather than merely counted.
+    var shelfMaxCount: Int {
+        didSet { UserDefaults.standard.set(shelfMaxCount, forKey: "shelfMaxCount") }
+    }
+
     /// Where an automatic retract sends a shelf. Nearest is where it lands
     /// otherwise, which depends on where the shake happened and so is never
     /// twice the same place.
@@ -385,6 +392,7 @@ final class AppState {
             "shelfLayout": "grid",
             "shelfAutoRetract": false,
             "shelfAutoRetractEdge": "right",
+            "shelfMaxCount": 5,
             "shelfSnap": true,
             "shelfDoubleClick": "dock",
             "shelfKeepInSpace": false,
@@ -444,6 +452,7 @@ final class AppState {
         shelfTakesFocus = defaults.bool(forKey: "shelfTakesFocus")
         shelfLayout = ShelfLayout(rawValue: defaults.string(forKey: "shelfLayout") ?? "") ?? .grid
         shelfAutoRetract = defaults.bool(forKey: "shelfAutoRetract")
+        shelfMaxCount = max(1, defaults.integer(forKey: "shelfMaxCount"))
         shelfAutoRetractEdge = ShelfCollapseEdge(
             rawValue: defaults.string(forKey: "shelfAutoRetractEdge") ?? ""
         ) ?? .right
