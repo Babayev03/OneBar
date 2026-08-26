@@ -93,16 +93,52 @@ enum ShelfTransforms {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
-        return try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { finished in
-                continuation.resume(returning: finished.terminationStatus)
+        // `terminate()` raises if the process was never launched, so Stop is
+        // only allowed to reach one that actually started.
+        let launched = LaunchFlag()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                process.terminationHandler = { finished in
+                    continuation.resume(returning: finished.terminationStatus)
+                }
+                do {
+                    try process.run()
+                    launched.markLaunched(process)
+                } catch {
+                    process.terminationHandler = nil
+                    continuation.resume(throwing: error)
+                }
             }
-            do {
-                try process.run()
-            } catch {
-                process.terminationHandler = nil
-                continuation.resume(throwing: error)
+        } onCancel: {
+            launched.terminate()
+        }
+    }
+
+    /// Stop has to reach the tool itself. A cancelled Swift task does nothing
+    /// to a `Process` that is already several seconds into a large archive.
+    private final class LaunchFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var process: Process?
+        private var cancelled = false
+
+        func markLaunched(_ process: Process) {
+            lock.lock()
+            defer { lock.unlock() }
+            // Cancellation can arrive before the process is up, in which case
+            // it is killed the moment it is.
+            if cancelled {
+                process.terminate()
+            } else {
+                self.process = process
             }
+        }
+
+        func terminate() {
+            lock.lock()
+            defer { lock.unlock() }
+            cancelled = true
+            process?.terminate()
+            process = nil
         }
     }
 
@@ -111,6 +147,7 @@ enum ShelfTransforms {
     static func convert(_ request: ImageActionRequest, store: ShelfStore = .shared) async throws -> [URL] {
         var written: [URL] = []
         for url in request.urls {
+            try Task.checkCancellation()
             if let output = try await convertOne(url, request: request, store: store) {
                 written.append(output)
             }
@@ -230,6 +267,7 @@ enum ShelfTransforms {
     ) async throws -> [URL] {
         var written: [URL] = []
         for url in urls {
+            try Task.checkCancellation()
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   CGImageSourceGetCount(source) > 0,
                   let identifier = CGImageSourceGetType(source)

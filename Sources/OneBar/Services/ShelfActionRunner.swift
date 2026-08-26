@@ -291,9 +291,12 @@ enum ShelfActionRunner {
         let task = Task { @MainActor in
             defer { controller.endActivity() }
             do {
-                let produced = try await Task.detached(priority: .userInitiated) {
-                    try await work()
-                }.value
+                // Called directly rather than through `Task.detached`, which is
+                // deliberately independent of its parent: cancelling this task
+                // would not have reached the work at all, so Stop would have
+                // cleared the footer while the run carried on. `work` is
+                // nonisolated, so it leaves the main actor on its own.
+                let produced = try await work()
                 guard controller.isActive, !Task.isCancelled else { return }
                 guard !produced.isEmpty else {
                     HUD.show("Nothing was produced", symbol: "exclamationmark.triangle")

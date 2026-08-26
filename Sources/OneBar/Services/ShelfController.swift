@@ -341,6 +341,11 @@ final class ShelfController {
             return true
         }
         if matches(.shelfCommandBar) {
+            // A shelf can be docked or retracted and still hold the keyboard —
+            // auto-retract puts it there right after the drop that focused it.
+            // Running actions against a shelf you cannot see is no use, so the
+            // bar brings it back first.
+            if model.collapse != nil { expand() }
             ShelfActionRunner.showCommandBar(in: self)
             return true
         }
