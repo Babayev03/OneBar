@@ -83,6 +83,7 @@ enum ShelfActionRunner {
                 in: controller,
                 activity: "Compressing…",
                 success: "Compressed",
+                folder: folder,
                 onFinish: onFinish
             ) { report in
                 [try await ShelfTransforms.compress(urls, in: folder, progress: report)]
@@ -95,6 +96,7 @@ enum ShelfActionRunner {
                 in: controller,
                 activity: "Stripping…",
                 success: "Metadata removed",
+                folder: folder,
                 onFinish: onFinish
             ) { report in
                 try await ShelfTransforms.removeMetadata(urls, in: folder, progress: report)
@@ -115,6 +117,7 @@ enum ShelfActionRunner {
                 in: controller,
                 activity: "Merging…",
                 success: "Merged to PDF",
+                folder: folder,
                 onFinish: onFinish
             ) { report in
                 [try await ShelfTransforms.mergePDF(urls, in: folder, progress: report)]
@@ -289,6 +292,7 @@ enum ShelfActionRunner {
             in: controller,
             activity: "Converting…",
             success: "Converted",
+            folder: request.folder,
             reveal: request.reveal,
             onFinish: onFinish
         ) { report in
@@ -330,6 +334,7 @@ enum ShelfActionRunner {
         in controller: ShelfController,
         activity: String,
         success: String,
+        folder: URL?,
         reveal: ShelfOutputReveal? = nil,
         onFinish: (@MainActor () -> Void)? = nil,
         work: @escaping @Sendable (@escaping ShelfProgressReport) async throws -> [URL]
@@ -380,7 +385,12 @@ enum ShelfActionRunner {
                 if reveal.addsToShelf {
                     controller.add(produced.compactMap { ShelfItemReader.fileItem(for: $0) })
                 }
-                if reveal.revealsInFinder {
+                // Finder is how you reach a result that went somewhere. One
+                // that stayed in OneBar's own folder has not gone anywhere, and
+                // it is already on the shelf — opening a Library path on top of
+                // that is noise. Still revealed when the shelf is not getting a
+                // copy, since then nothing else would show it at all.
+                if reveal.revealsInFinder, folder != nil || !reveal.addsToShelf {
                     NSWorkspace.shared.activateFileViewerSelecting(produced)
                 }
                 ShelfProgressPanel.shared.finish(success)

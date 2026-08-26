@@ -230,7 +230,7 @@ struct ShelfPane: View {
                         .frame(width: 150)
                     }
                     Divider()
-                    row("Show output in", subtitle: nil) {
+                    row("Show output in", subtitle: outputRevealNote) {
                         Picker("", selection: outputRevealBinding) {
                             ForEach(ShelfOutputReveal.allCases) { Text($0.title).tag($0) }
                         }
@@ -717,6 +717,15 @@ struct ShelfPane: View {
 
     private var outputRevealBinding: Binding<ShelfOutputReveal> {
         Binding(get: { state.shelfOutputReveal }, set: { state.shelfOutputReveal = $0 })
+    }
+
+    /// Finder only reveals a result that went somewhere to be found. One left
+    /// in OneBar's own folder is already on the shelf, and opening a Library
+    /// path on top of that helps nobody — so the setting quietly does less, and
+    /// says so rather than looking broken.
+    private var outputRevealNote: String? {
+        guard state.shelfOutputReveal == .both, state.shelfOutputFolder.isEmpty else { return nil }
+        return "With no folder chosen, output stays in OneBar's own folder and Finder is not opened — the result is on the shelf. Choose a folder below to have it revealed."
     }
 
     private var outputFolderLabel: String {
