@@ -101,7 +101,7 @@ struct ShelfPane: View {
                     Divider()
                     row(
                         "New and notch shelf location",
-                        subtitle: "Used by notch drops, New Shelf, and shelf shortcuts. A shake shelf always opens at the cursor."
+                        subtitle: "Used by notch drops, New Shelf, and shelf shortcuts. A shake shelf opens at the cursor instead, but retracts to here."
                     ) {
                         Picker("", selection: locationBinding) {
                             ForEach(ShelfLocation.allCases) { Text($0.title).tag($0) }
@@ -184,9 +184,6 @@ struct ShelfPane: View {
                     Divider()
                     row("Use colour to distinguish shelves", subtitle: "Gives each open shelf its own indicator colour. A shelf you colour yourself keeps the colour you picked.") {
                         Toggle("", isOn: colorLabelsBinding).toggleStyle(.switch).labelsHidden()
-                    }
-                    row("Take focus immediately", subtitle: "A shelf summoned mid-drag normally waits for the drop before claiming the keyboard, so the drag is never cut short. Turn this on to have it take focus the moment it appears.") {
-                        Toggle("", isOn: takesFocusBinding).toggleStyle(.switch).labelsHidden()
                     }
                     row("New shelves open as", subtitle: nil) {
                         Picker("", selection: layoutBinding) {
@@ -580,10 +577,6 @@ struct ShelfPane: View {
         picker.message = "Where should action output be saved?"
         guard picker.runModal() == .OK, let url = picker.url else { return }
         state.shelfOutputFolder = url.path
-    }
-
-    private var takesFocusBinding: Binding<Bool> {
-        Binding(get: { state.shelfTakesFocus }, set: { state.shelfTakesFocus = $0 })
     }
 
     private var layoutBinding: Binding<ShelfLayout> {

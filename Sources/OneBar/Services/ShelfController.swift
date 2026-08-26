@@ -185,8 +185,7 @@ final class ShelfController {
         // A shelf summoned mid-drag is ordered front without focus: the drag is
         // still in the user's hand and this is the window it is being dropped
         // on. It claims the keyboard when the drop lands instead, which is what
-        // makes the shelf keys work without clicking it first. The preference
-        // overrides that for anyone who wants to type at it the moment it opens.
+        // makes the shelf keys work without clicking it first.
         switch focus {
         case .none:
             panel.orderFrontRegardless()
@@ -195,11 +194,7 @@ final class ShelfController {
             takeFocus()
         case .afterFirstDrop:
             panel.orderFrontRegardless()
-            if AppState.shared.shelfTakesFocus {
-                takeFocus()
-            } else {
-                wantsFocusAfterFirstDrop = true
-            }
+            wantsFocusAfterFirstDrop = true
         }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             model.isPresented = true

@@ -244,12 +244,6 @@ final class AppState {
         didSet { UserDefaults.standard.set(shelfColorLabels, forKey: "shelfColorLabels") }
     }
 
-    /// A shelf summoned mid-drag waits for the drop before taking focus, so
-    /// the drag is never cut short. This overrides that.
-    var shelfTakesFocus: Bool {
-        didSet { UserDefaults.standard.set(shelfTakesFocus, forKey: "shelfTakesFocus") }
-    }
-
     /// Layout a new shelf starts in; each shelf can then be switched on its own.
     var shelfLayout: ShelfLayout {
         didSet { UserDefaults.standard.set(shelfLayout.rawValue, forKey: "shelfLayout") }
@@ -388,7 +382,6 @@ final class AppState {
             "shelfAlwaysCopy": false,
             "shelfCloseBehavior": "whenMoved",
             "shelfColorLabels": true,
-            "shelfTakesFocus": false,
             "shelfLayout": "grid",
             "shelfAutoRetract": false,
             "shelfAutoRetractEdge": "right",
@@ -449,7 +442,6 @@ final class AppState {
         shelfAlwaysCopy = defaults.bool(forKey: "shelfAlwaysCopy")
         shelfCloseBehavior = ShelfCloseBehavior(rawValue: defaults.string(forKey: "shelfCloseBehavior") ?? "") ?? .whenMoved
         shelfColorLabels = defaults.bool(forKey: "shelfColorLabels")
-        shelfTakesFocus = defaults.bool(forKey: "shelfTakesFocus")
         shelfLayout = ShelfLayout(rawValue: defaults.string(forKey: "shelfLayout") ?? "") ?? .grid
         shelfAutoRetract = defaults.bool(forKey: "shelfAutoRetract")
         shelfMaxCount = max(1, defaults.integer(forKey: "shelfMaxCount"))
