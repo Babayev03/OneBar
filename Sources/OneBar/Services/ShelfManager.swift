@@ -220,22 +220,6 @@ final class ShelfManager {
         return max(a.frame.minY, b.frame.minY) < min(a.frame.maxY, b.frame.maxY)
     }
 
-    /// The vertical bands already taken by collapsed shelves on one edge.
-    func collapsedRows(
-        on edge: ShelfEdge,
-        in visible: NSRect,
-        excluding controller: ShelfController
-    ) -> [ClosedRange<CGFloat>] {
-        shelves.compactMap { shelf in
-            guard shelf !== controller,
-                  let data = shelf.collapseStackData,
-                  data.edge == edge,
-                  data.visible == visible
-            else { return nil }
-            return data.frame.minY...data.frame.maxY
-        }
-    }
-
     // MARK: - Internal transfers
 
     /// Moves or copies items between two live shelves without round-tripping

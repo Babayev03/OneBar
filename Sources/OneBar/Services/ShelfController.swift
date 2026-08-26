@@ -108,6 +108,9 @@ final class ShelfController {
     /// Where an automatic retract wants to sit, applied as part of the collapse
     /// animation rather than as a jump before it.
     private var collapseAnchorY: CGFloat?
+    /// True for a shelf summoned by a shake, which appears under the pointer
+    /// rather than at the place every other shelf is put.
+    private let placedAtCursor: Bool
 
     private static let dockAnimationDuration = 0.22
 
@@ -121,6 +124,7 @@ final class ShelfController {
 
     private init(snapshot: ShelfSnapshot?, at point: NSPoint?, focus: ShelfFocusIntent) {
         id = snapshot?.id ?? UUID()
+        placedAtCursor = snapshot == nil && point != nil
         if let snapshot {
             model.items = snapshot.items
             model.name = snapshot.name
@@ -1017,24 +1021,17 @@ final class ShelfController {
     /// so without this every shelf ends up at a different height along the edge
     /// and none of them stack together.
     func autoRetract() {
-        let preferred = AppState.shared.shelfAutoRetractEdge.edge
         var anchor: CGFloat?
-        if let panel, let visible = visibleFrame(for: panel.frame) {
-            let edge = preferred ?? nearestEdge(in: visible)
-            // Fill the column downward first; only once it is full does a shelf
-            // go back to the top, where it stacks in front of the first one.
-            anchor = ShelfWindowGeometry.firstFreeRow(
-                height: panel.frame.height,
-                in: visible,
-                occupiedRows: ShelfManager.shared.collapsedRows(
-                    on: edge, in: visible, excluding: self
-                )
-            ) ?? max(
-                visible.minY + ShelfWindowGeometry.margin,
-                visible.maxY - panel.frame.height - ShelfWindowGeometry.margin
-            )
+        // A shake puts the shelf under the pointer, which is nowhere in
+        // particular, and it keeps that height all the way to the edge. Every
+        // other shelf is placed at the configured location and nudged clear of
+        // the ones already there — which is exactly why a column of shelves
+        // made by dropping on the notch comes out tidy. Borrow that placement
+        // for the retract, so both routes end up in the same column.
+        if placedAtCursor, let panel, let visible = visibleFrame(for: panel.frame) {
+            anchor = defaultPlacement(size: panel.frame.size, in: visible).minY
         }
-        retract(to: preferred, anchorY: anchor)
+        retract(to: AppState.shared.shelfAutoRetractEdge.edge, anchorY: anchor)
     }
 
     func dock(to edge: ShelfEdge? = nil) { collapse(.docked, to: edge) }
@@ -1527,10 +1524,25 @@ final class ShelfController {
         guard let screen else { return }
         let visible = screen.visibleFrame
 
+        // A shake is a request for the shelf to appear under the hand that
+        // shook, so it lands there untouched; everything else goes where the
+        // preference says, clear of the shelves already out.
+        let frame = point == nil
+            ? defaultPlacement(size: size, in: visible)
+            : clampedToScreen(NSRect(
+                origin: NSPoint(x: cursor.x - size.width / 2, y: cursor.y - size.height / 2),
+                size: size
+            ))
+        panel.setFrame(frame, display: false)
+    }
+
+    /// Where a shelf goes when nothing points at a particular spot: the
+    /// configured location, nudged clear of the shelves already on screen.
+    private func defaultPlacement(size: NSSize, in visible: NSRect) -> NSRect {
         let origin: NSPoint
-        let location = point == nil ? AppState.shared.shelfLocation : .cursor
-        switch location {
+        switch AppState.shared.shelfLocation {
         case .cursor:
+            let cursor = NSEvent.mouseLocation
             origin = NSPoint(x: cursor.x - size.width / 2, y: cursor.y - size.height / 2)
         case .topLeft:
             origin = NSPoint(x: visible.minX + 20, y: visible.maxY - size.height - 20)
@@ -1543,15 +1555,13 @@ final class ShelfController {
         case .center:
             origin = NSPoint(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2)
         }
-        var frame = clampedToScreen(NSRect(origin: origin, size: size))
-        if point == nil {
-            frame = ShelfWindowGeometry.avoidingOverlap(
-                frame,
-                in: visible,
-                occupiedFrames: ShelfManager.shared.shelves.compactMap(\.frameOnScreen)
-            )
-        }
-        panel.setFrame(frame, display: false)
+        return ShelfWindowGeometry.avoidingOverlap(
+            clampedToScreen(NSRect(origin: origin, size: size)),
+            in: visible,
+            occupiedFrames: ShelfManager.shared.shelves
+                .filter { $0 !== self }
+                .compactMap(\.frameOnScreen)
+        )
     }
 
     private func clampedToScreen(_ frame: NSRect) -> NSRect {
