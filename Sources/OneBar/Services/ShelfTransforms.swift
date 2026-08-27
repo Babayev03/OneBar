@@ -13,6 +13,12 @@ enum ShelfTransformError: LocalizedError {
     case writeFailed
     case toolFailed(Int32)
     case noWebPEncoder
+    case scriptMissing(String)
+    /// Carries the script's own last words, which say far more than a number —
+    /// and the number when it said nothing at all, since "failed" alone does not
+    /// separate a script that ran and returned an error from one that never got
+    /// as far as running.
+    case scriptFailed(name: String, status: Int32, message: String?)
 
     var errorDescription: String? {
         switch self {
@@ -21,6 +27,9 @@ enum ShelfTransformError: LocalizedError {
         case .writeFailed: return "Could not write the result"
         case .toolFailed: return "The command-line tool failed"
         case .noWebPEncoder: return "WebP needs cwebp, which is not installed"
+        case .scriptMissing(let name): return "\(name) is no longer where it was"
+        case .scriptFailed(let name, let status, let message):
+            return message.map { "\(name): \($0)" } ?? "\(name) failed (exit \(status))"
         }
     }
 }
@@ -123,6 +132,154 @@ enum ShelfTransforms {
 
     /// Stop has to reach the tool itself. A cancelled Swift task does nothing
     /// to a `Process` that is already several seconds into a large archive.
+    // MARK: - Custom scripts
+
+    /// Runs a registered script or Automator workflow over the given files.
+    ///
+    /// The contract is one sentence in each direction: the files arrive as
+    /// arguments, and whatever is left in `ONEBAR_OUTPUT_DIR` comes back. That
+    /// directory is a fresh one per run rather than `action-output` itself,
+    /// because otherwise there is no way to tell what this run produced from
+    /// what was already sitting there. Results are moved into the real output
+    /// folder afterwards, so they land exactly where every other action's do.
+    static func runCustom(
+        _ action: CustomShelfAction,
+        script: URL,
+        urls: [URL],
+        in folder: URL? = nil,
+        store: ShelfStore = .shared,
+        progress: ShelfProgressReport? = nil
+    ) async throws -> [URL] {
+        guard !urls.isEmpty else { return [] }
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OneBarScript-\(UUID().uuidString)", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(
+            at: staging, withIntermediateDirectories: true
+        )) != nil else { throw ShelfTransformError.noOutputLocation }
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        let errorLog = staging.appendingPathComponent(".onebar-stderr")
+        progress?(0, 0, action.name)
+
+        let status = try await runScript(
+            action,
+            script: script,
+            urls: urls,
+            outputDirectory: staging,
+            errorLog: errorLog
+        )
+        // Read before collecting, since the log lives in the staging directory
+        // and must not come back as one of the script's own outputs.
+        let message = tail(of: errorLog)
+        try? FileManager.default.removeItem(at: errorLog)
+        guard status == 0 else {
+            throw ShelfTransformError.scriptFailed(
+                name: action.name, status: status, message: message
+            )
+        }
+
+        let produced = (try? FileManager.default.contentsOfDirectory(
+            at: staging,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        var results: [URL] = []
+        for (index, source) in produced.enumerated() {
+            progress?(index, produced.count, source.lastPathComponent)
+            guard let destination = store.outputURL(
+                base: source.deletingPathExtension().lastPathComponent,
+                extension: source.pathExtension,
+                in: folder
+            ) else { continue }
+            // Not `try?`: a result the script worked to produce and that cannot
+            // be moved is worth saying so about, rather than silently dropping.
+            try FileManager.default.moveItem(at: source, to: destination)
+            results.append(destination)
+        }
+        return results
+    }
+
+    /// The one place a user's own code is started.
+    ///
+    /// Three details are load-bearing. A shell script without its executable
+    /// bit is the commonest way this fails, so one is handed to `/bin/sh`
+    /// rather than refused. Output goes to files rather than pipes, because a
+    /// script that prints more than a pipe buffer holds would block forever
+    /// waiting for someone to drain it. And the environment is inherited rather
+    /// than replaced, so a script can still find the tools on the user's PATH.
+    private static func runScript(
+        _ action: CustomShelfAction,
+        script: URL,
+        urls: [URL],
+        outputDirectory: URL,
+        errorLog: URL
+    ) async throws -> Int32 {
+        let paths = urls.map(\.path)
+        let process = Process()
+
+        switch action.runner {
+        case .automator:
+            process.executableURL = URL(filePath: "/usr/bin/automator")
+            process.arguments = paths.flatMap { ["-i", $0] } + [script.path]
+        case .shell:
+            if FileManager.default.isExecutableFile(atPath: script.path) {
+                process.executableURL = script
+                process.arguments = paths
+            } else {
+                process.executableURL = URL(filePath: "/bin/sh")
+                process.arguments = [script.path] + paths
+            }
+        }
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["ONEBAR_OUTPUT_DIR"] = outputDirectory.path
+        environment["ONEBAR_FILE_COUNT"] = String(urls.count)
+        environment["ONEBAR_ACTION_NAME"] = action.name
+        process.environment = environment
+        process.currentDirectoryURL = outputDirectory
+
+        FileManager.default.createFile(atPath: errorLog.path, contents: nil)
+        let errorHandle = try FileHandle(forWritingTo: errorLog)
+        // Both streams go to the same log: a script that reports on stdout and
+        // one that reports on stderr are equally common, and the only use made
+        // of either is explaining a failure.
+        process.standardOutput = errorHandle
+        process.standardError = errorHandle
+        process.standardInput = FileHandle.nullDevice
+
+        let launched = LaunchFlag()
+        defer { try? errorHandle.close() }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                process.terminationHandler = { finished in
+                    continuation.resume(returning: finished.terminationStatus)
+                }
+                do {
+                    try process.run()
+                    launched.markLaunched(process)
+                } catch {
+                    process.terminationHandler = nil
+                    continuation.resume(throwing: error)
+                }
+            }
+        } onCancel: {
+            launched.terminate()
+        }
+    }
+
+    /// The script's last useful line, which is what a person wants to see when
+    /// something failed. Capped because a runaway script can produce megabytes.
+    private static func tail(of log: URL) -> String? {
+        guard let data = try? Data(contentsOf: log), !data.isEmpty else { return nil }
+        let text = String(decoding: data.suffix(4096), as: UTF8.self)
+        return text
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+            .map { String($0.prefix(200)) }
+    }
+
     private final class LaunchFlag: @unchecked Sendable {
         private let lock = NSLock()
         private var process: Process?

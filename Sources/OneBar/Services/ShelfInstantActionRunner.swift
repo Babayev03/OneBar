@@ -90,6 +90,13 @@ enum ShelfInstantActionRunner {
                 in: controller,
                 onFinish: onFinish
             )
+        case .custom(let id):
+            guard let custom = CustomActionStore.shared.action(id) else {
+                HUD.show("That action has been removed", symbol: "exclamationmark.triangle")
+                onFinish?()
+                return
+            }
+            ShelfActionRunner.runCustom(custom, on: subject, in: controller, onFinish: onFinish)
         }
     }
 

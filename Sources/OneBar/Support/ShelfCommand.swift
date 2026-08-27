@@ -6,6 +6,9 @@ enum ShelfCommandKind: Equatable, Hashable {
     case action(ShelfAction)
     case convert(ImageFormat)
     case resize(ImageResize)
+    /// A script the user registered. Held by id rather than by value so a
+    /// renamed one is still the same action everywhere it was put.
+    case custom(UUID)
 }
 
 struct ShelfCommand: Identifiable, Equatable {
@@ -22,6 +25,7 @@ struct ShelfCommand: Identifiable, Equatable {
         case .action(let action): return "action.\(action.rawValue)"
         case .convert(let format): return "convert.\(format.rawValue)"
         case .resize(let resize): return "resize.\(resize.title)"
+        case .custom(let id): return "custom.\(id.uuidString)"
         }
     }
 }
@@ -29,7 +33,13 @@ struct ShelfCommand: Identifiable, Equatable {
 enum ShelfCommandSearch {
     /// Everything currently possible, in menu order. Presets follow the action
     /// they expand, so an unfiltered bar reads like the menu does.
-    static func commands(for subject: ShelfActionSubject) -> [ShelfCommand] {
+    ///
+    /// The user's own actions are passed in rather than read from the store, so
+    /// this stays a pure function of its inputs.
+    static func commands(
+        for subject: ShelfActionSubject,
+        custom: [CustomShelfAction]
+    ) -> [ShelfCommand] {
         var commands: [ShelfCommand] = []
         for action in ShelfAction.groups.flatMap({ $0 })
         where action.isAvailable(for: subject) {
@@ -64,6 +74,18 @@ enum ShelfCommandSearch {
                     ))
                 }
             }
+        }
+        // Custom actions last, under their own heading in the menus: they are
+        // the user's, and putting them above the built-ins would reorder a list
+        // people already know.
+        for custom in custom where custom.isAvailable(for: subject) {
+            commands.append(ShelfCommand(
+                kind: .custom(custom.id),
+                title: custom.name,
+                subtitle: "Custom Action",
+                symbol: custom.symbol,
+                keywords: ["script", "custom", "workflow"]
+            ))
         }
         return commands
     }

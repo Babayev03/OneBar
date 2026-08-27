@@ -182,13 +182,13 @@ struct ShelfCommandTests {
     @Test("Only what is currently possible is listed")
     func listsAvailableOnly() {
         let empty = ShelfActionSubject(items: [], shelfItemCount: 0)
-        let kinds = ShelfCommandSearch.commands(for: empty).map(\.kind)
+        let kinds = ShelfCommandSearch.commands(for: empty, custom: []).map(\.kind)
         #expect(kinds == [.action(.addFromClipboard)])
     }
 
     @Test("Presets are rows of their own")
     func presetsAreRows() throws {
-        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        let commands = ShelfCommandSearch.commands(for: try imageSubject(), custom: [])
         #expect(commands.contains { $0.kind == .convert(.png) })
         #expect(commands.contains { $0.kind == .resize(.percent(50)) })
         // The action itself is still there, to reach the custom dialog.
@@ -197,14 +197,14 @@ struct ShelfCommandTests {
 
     @Test("A format name finds its own conversion, not the submenu")
     func formatQuery() throws {
-        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        let commands = ShelfCommandSearch.commands(for: try imageSubject(), custom: [])
         let top = ShelfCommandSearch.rank(commands, query: "png").first
         #expect(top?.kind == .convert(.png))
     }
 
     @Test("Synonyms reach actions whose titles do not contain them")
     func synonyms() throws {
-        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        let commands = ShelfCommandSearch.commands(for: try imageSubject(), custom: [])
         func top(_ query: String) -> ShelfCommandKind? {
             ShelfCommandSearch.rank(commands, query: query).first?.kind
         }
@@ -216,7 +216,7 @@ struct ShelfCommandTests {
 
     @Test("A word anywhere in the title matches, and menu order breaks ties")
     func wordMatching() throws {
-        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        let commands = ShelfCommandSearch.commands(for: try imageSubject(), custom: [])
         let trash = ShelfCommandSearch.rank(commands, query: "trash")
         #expect(trash.first?.kind == .action(.moveToTrash))
 
@@ -227,7 +227,7 @@ struct ShelfCommandTests {
 
     @Test("An unmatched query returns nothing rather than everything")
     func noMatch() throws {
-        let commands = ShelfCommandSearch.commands(for: try imageSubject())
+        let commands = ShelfCommandSearch.commands(for: try imageSubject(), custom: [])
         #expect(ShelfCommandSearch.rank(commands, query: "xyzzy").isEmpty)
         // An empty query is not a filter.
         #expect(ShelfCommandSearch.rank(commands, query: "   ").count == commands.count)

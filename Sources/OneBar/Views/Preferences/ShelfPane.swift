@@ -23,6 +23,7 @@ struct ShelfPane: View {
     /// The Preferences preview is the strip itself, so what is shown here and
     /// what appears under a shelf cannot drift apart.
     @State private var previewModel = ShelfInstantActionBarModel()
+    @State private var editingAction: CustomShelfAction?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -54,6 +55,18 @@ struct ShelfPane: View {
         }
         .onChange(of: state.shelfInstantActionIDs) { _, _ in
             refreshInstantActionPreview()
+        }
+        // Renaming or re-iconing a custom action changes a button too.
+        .onChange(of: CustomActionStore.shared.actions) { _, _ in
+            refreshInstantActionPreview()
+        }
+        .sheet(item: $editingAction) { action in
+            CustomActionEditor(action: action) { edited in
+                store.update(edited)
+                editingAction = nil
+            } onCancel: {
+                editingAction = nil
+            }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didChangeScreenParametersNotification
@@ -426,8 +439,144 @@ struct ShelfPane: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
+
+            customActions
         }
         .disabled(!state.shelfEnabled)
+    }
+
+    // MARK: - Custom actions
+
+    private var customActions: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("A script of your own, run over whatever you drop on it. The files arrive as arguments, and anything it leaves in $ONEBAR_OUTPUT_DIR comes back onto the shelf. Shell scripts and Automator workflows both work.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if store.actions.isEmpty {
+                    Text("No custom actions")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
+                } else {
+                    ForEach(store.actions) { action in
+                        customActionRow(action)
+                    }
+                }
+
+                Divider()
+
+                HStack {
+                    Button("Add…") { addCustomAction() }
+                        .controlSize(.small)
+                    Button("Example Script") { writeExampleScript() }
+                        .controlSize(.small)
+                        .help("Writes a working script to your Desktop and adds it, so there is something to try")
+                    Spacer()
+                    Button("Reveal scripts.json") {
+                        NSWorkspace.shared.activateFileViewerSelecting([store.revealURL])
+                    }
+                    .controlSize(.small)
+                }
+
+                Text("A custom action runs with your own privileges on the files you give it. Only add scripts you have read.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(6)
+        } label: {
+            Text("Custom Actions")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func customActionRow(_ action: CustomShelfAction) -> some View {
+        let missing = action.resolveURL() == nil
+        HStack(spacing: 8) {
+            Image(systemName: action.symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+            Text(action.name)
+                .font(.system(size: 13))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if missing {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .help("This script is no longer where it was")
+            }
+            Spacer()
+            Button { editingAction = action } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .controlSize(.small)
+            .help("Change the name, icon or script this action uses")
+            Button { store.move(action.id, by: -1) } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.borderless)
+                .disabled(store.actions.first?.id == action.id)
+            Button { store.move(action.id, by: 1) } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.borderless)
+                .disabled(store.actions.last?.id == action.id)
+            Button { store.remove(action.id) } label: { Image(systemName: "minus.circle") }
+                .buttonStyle(.borderless)
+                .help("Remove this action. The script itself is left alone.")
+        }
+    }
+
+    private var store: CustomActionStore { CustomActionStore.shared }
+
+    private func addCustomAction() {
+        let picker = NSOpenPanel()
+        picker.canChooseFiles = true
+        picker.canChooseDirectories = true
+        picker.allowsMultipleSelection = false
+        picker.treatsFilePackagesAsDirectories = false
+        picker.message = "Choose a script or an Automator workflow"
+        picker.prompt = "Add"
+        guard picker.runModal() == .OK, let url = picker.url else { return }
+        // Straight into the editor: a script added from a picker has the file's
+        // name and a default icon, which is exactly the state somebody wants to
+        // change immediately.
+        editingAction = store.add(path: url.path)
+    }
+
+    /// Somewhere to start. Registering a working script is the fastest way to
+    /// see what the contract actually is, and it saves a first attempt failing
+    /// on a missing executable bit or a misremembered variable name.
+    private func writeExampleScript() {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Desktop/OneBar Example Action.sh")
+        let script = """
+        #!/bin/sh
+        # A OneBar custom action.
+        #
+        # The files you dropped arrive as arguments.
+        # Anything written to $ONEBAR_OUTPUT_DIR comes back onto the shelf.
+        # Anything printed here is shown only if the script fails.
+
+        for f in "$@"; do
+          name=$(basename "$f")
+          sips -Z 800 "$f" --out "$ONEBAR_OUTPUT_DIR/$name" >/dev/null
+        done
+
+        """
+        guard (try? script.write(to: url, atomically: true, encoding: .utf8)) != nil else {
+            HUD.show("Could not write the example", symbol: "exclamationmark.triangle")
+            return
+        }
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: url.path
+        )
+        store.add(path: url.path, name: "Shrink to 800px", symbol: "photo")
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private var instantActions: [ShelfInstantAction] {

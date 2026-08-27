@@ -67,6 +67,7 @@ struct ShelfInstantAction: Identifiable, Equatable {
         case document
         case share
         case other
+        case custom
 
         var id: String { rawValue }
 
@@ -76,6 +77,7 @@ struct ShelfInstantAction: Identifiable, Equatable {
             case .document: return "Document"
             case .share: return "Share"
             case .other: return "Other"
+            case .custom: return "Custom"
             }
         }
     }
@@ -158,8 +160,21 @@ struct ShelfInstantAction: Identifiable, Equatable {
                 category: .other
             ),
         ])
+        for custom in CustomActionStore.shared.actions {
+            actions.append(ShelfInstantAction(
+                id: customID(custom.id),
+                kind: .custom(custom.id),
+                title: custom.name,
+                symbol: custom.symbol,
+                category: .custom
+            ))
+        }
         return actions
     }
+
+    /// The persisted id of a custom action's button. Derived rather than stored
+    /// so removing a script can find and drop its button.
+    static func customID(_ id: UUID) -> String { "custom.\(id.uuidString)" }
 
     static let defaultIDs = ["compress", "convert.jpeg", "mergePDF", "share"]
 
@@ -186,6 +201,10 @@ struct ShelfInstantAction: Identifiable, Equatable {
         switch kind {
         case .convert, .resize:
             return preview.producesImages
+        // A script is handed paths, so it needs something that will be a file
+        // by the time it runs — which everything except a bare link becomes.
+        case .custom:
+            return preview.producesFiles
         case .action(let action):
             switch action {
             case .compress: return preview.producesFiles
@@ -215,6 +234,7 @@ struct ShelfInstantAction: Identifiable, Equatable {
         case .action(let action): return action.title
         case .convert(let format): return "Convert to \(format.title)"
         case .resize(let resize): return "Resize to \(resize.title)"
+        case .custom: return title
         }
     }
 }

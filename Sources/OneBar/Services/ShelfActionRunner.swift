@@ -192,7 +192,10 @@ enum ShelfActionRunner {
 
     static func showCommandBar(in controller: ShelfController) {
         let subject = subject(for: .selection, in: controller)
-        let commands = ShelfCommandSearch.commands(for: subject)
+        let commands = ShelfCommandSearch.commands(
+            for: subject,
+            custom: CustomActionStore.shared.actions
+        )
         guard !commands.isEmpty else { return }
         ShelfDialog.shared.present(
             title: nil,
@@ -201,6 +204,45 @@ enum ShelfActionRunner {
             near: controller.anchorView?.window
         ) {
             ShelfCommandBarView(controller: controller, commands: commands)
+        }
+    }
+
+    /// Runs one of the user's own scripts over the given files.
+    ///
+    /// Goes through `produce` like every other action that writes, so it gets
+    /// the progress window, a Stop that reaches the process itself, and the same
+    /// rules about where the results land.
+    static func runCustom(
+        _ action: CustomShelfAction,
+        on subject: ShelfActionSubject,
+        in controller: ShelfController,
+        onFinish: (@MainActor () -> Void)? = nil
+    ) {
+        guard action.isAvailable(for: subject) else {
+            onFinish?()
+            return
+        }
+        guard let script = action.resolveURL() else {
+            HUD.show("\(action.name) is no longer where it was", symbol: "exclamationmark.triangle")
+            onFinish?()
+            return
+        }
+        let urls = subject.fileURLs
+        let folder = defaultFolder
+        produce(
+            in: controller,
+            activity: "\(action.name)…",
+            success: action.name,
+            folder: folder,
+            // A script that uploads, tags or files something away has done its
+            // job without writing anything back, so an empty result here is
+            // success rather than the warning a built-in transform would get.
+            allowsEmptyResult: true,
+            onFinish: onFinish
+        ) { report in
+            try await ShelfTransforms.runCustom(
+                action, script: script, urls: urls, in: folder, progress: report
+            )
         }
     }
 
@@ -236,6 +278,9 @@ enum ShelfActionRunner {
                 ),
                 in: controller
             )
+        case .custom(let id):
+            guard let action = CustomActionStore.shared.action(id) else { return }
+            runCustom(action, on: subject(for: .selection, in: controller), in: controller)
         }
     }
 
@@ -336,6 +381,7 @@ enum ShelfActionRunner {
         success: String,
         folder: URL?,
         reveal: ShelfOutputReveal? = nil,
+        allowsEmptyResult: Bool = false,
         onFinish: (@MainActor () -> Void)? = nil,
         work: @escaping @Sendable (@escaping ShelfProgressReport) async throws -> [URL]
     ) {
@@ -378,8 +424,12 @@ enum ShelfActionRunner {
                 let produced = try await work(report)
                 guard controller.isActive, !Task.isCancelled else { return }
                 guard !produced.isEmpty else {
-                    ShelfProgressPanel.shared.dismiss()
-                    HUD.show("Nothing was produced", symbol: "exclamationmark.triangle")
+                    if allowsEmptyResult {
+                        ShelfProgressPanel.shared.finish(success)
+                    } else {
+                        ShelfProgressPanel.shared.dismiss()
+                        HUD.show("Nothing was produced", symbol: "exclamationmark.triangle")
+                    }
                     return
                 }
                 if reveal.addsToShelf {

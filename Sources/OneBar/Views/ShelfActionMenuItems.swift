@@ -20,6 +20,19 @@ struct ShelfActionMenuItems: View {
                 }
             }
         }
+
+        let customs = CustomActionStore.shared.actions.filter { $0.isAvailable(for: subject) }
+        if !customs.isEmpty {
+            Section("Custom Actions") {
+                ForEach(customs) { custom in
+                    Button {
+                        ShelfActionRunner.runCustom(custom, on: subject, in: controller)
+                    } label: {
+                        Label(custom.name, systemImage: custom.symbol)
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder

@@ -22,6 +22,19 @@ final class ShelfActionCommand: NSObject {
     }
 }
 
+/// A registered script chosen from a menu. Separate from `ShelfActionCommand`
+/// because a custom action is not a `ShelfAction` and never will be — the built-
+/// in list is a closed enum on purpose.
+final class ShelfCustomActionCommand: NSObject {
+    let id: UUID
+    let scope: ShelfActionScope
+
+    init(id: UUID, scope: ShelfActionScope) {
+        self.id = id
+        self.scope = scope
+    }
+}
+
 /// Target of every shelf menu item. `NSMenuItem.target` is weak, so the view
 /// raising the menu owns one of these for as long as it lives.
 @MainActor
@@ -40,6 +53,18 @@ final class ShelfMenuResponder: NSObject {
         let picker = NSSharingServicePicker(items: ShelfActionRunner.shareableItems(in: subject))
         sharePicker = picker
         return picker.standardShareMenuItem
+    }
+
+    @objc func runCustomShelfAction(_ sender: NSMenuItem) {
+        guard let controller,
+              let command = sender.representedObject as? ShelfCustomActionCommand,
+              let action = CustomActionStore.shared.action(command.id)
+        else { return }
+        ShelfActionRunner.runCustom(
+            action,
+            on: ShelfActionRunner.subject(for: command.scope, in: controller),
+            in: controller
+        )
     }
 
     @objc func runShelfAction(_ sender: NSMenuItem) {
@@ -93,6 +118,22 @@ enum ShelfActionMenu {
             if !menu.items.isEmpty { menu.addItem(.separator()) }
             for action in available {
                 menu.addItem(item(for: action, scope: scope, subject: subject, target: target))
+            }
+        }
+
+        let customs = CustomActionStore.shared.actions.filter { $0.isAvailable(for: subject) }
+        if !customs.isEmpty {
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
+            for custom in customs {
+                let item = NSMenuItem(
+                    title: custom.name,
+                    action: #selector(ShelfMenuResponder.runCustomShelfAction(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = target
+                item.image = symbol(custom.symbol)
+                item.representedObject = ShelfCustomActionCommand(id: custom.id, scope: scope)
+                menu.addItem(item)
             }
         }
         return menu
