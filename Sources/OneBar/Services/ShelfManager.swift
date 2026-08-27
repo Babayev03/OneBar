@@ -153,6 +153,7 @@ final class ShelfManager {
             closeAll()
         }
         ShelfDragObserver.shared.restart()
+        FolderWatchService.shared.restart()
         persist()
     }
 

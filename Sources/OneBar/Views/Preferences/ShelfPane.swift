@@ -6,6 +6,7 @@ struct ShelfPane: View {
         case activation = "Activation"
         case interaction = "Interaction"
         case actions = "Actions"
+        case folders = "Folders"
         case shelves = "Shelves"
 
         var id: String { rawValue }
@@ -24,6 +25,7 @@ struct ShelfPane: View {
     /// what appears under a shelf cannot drift apart.
     @State private var previewModel = ShelfInstantActionBarModel()
     @State private var editingAction: CustomShelfAction?
+    @State private var editingWatch: ShelfFolderWatch?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -41,6 +43,7 @@ struct ShelfPane: View {
                     case .activation: activation
                     case .interaction: interaction
                     case .actions: actions
+                    case .folders: folders
                     case .shelves: shelves
                     }
                 }
@@ -59,6 +62,14 @@ struct ShelfPane: View {
         // Renaming or re-iconing a custom action changes a button too.
         .onChange(of: CustomActionStore.shared.actions) { _, _ in
             refreshInstantActionPreview()
+        }
+        .sheet(item: $editingWatch) { watch in
+            FolderWatchEditor(watch: watch) { edited in
+                watchStore.update(edited)
+                editingWatch = nil
+            } onCancel: {
+                editingWatch = nil
+            }
         }
         .sheet(item: $editingAction) { action in
             CustomActionEditor(action: action) { edited in
@@ -597,6 +608,170 @@ struct ShelfPane: View {
 
     private var instantActionsBinding: Binding<Bool> {
         Binding(get: { state.shelfInstantActions }, set: { state.shelfInstantActions = $0 })
+    }
+
+    // MARK: - Folders
+
+    private var watchStore: FolderWatchStore { FolderWatchStore.shared }
+
+    private var folders: some View {
+        VStack(spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    row(
+                        "Send screenshots to a shelf",
+                        subtitle: "Every screenshot you take lands on a shelf instead of only in the folder. OneBar follows wherever macOS is set to save them."
+                    ) {
+                        Toggle("", isOn: screenshotWatchBinding).toggleStyle(.switch).labelsHidden()
+                    }
+                    if let screenshot = watchStore.screenshotWatch {
+                        Divider()
+                        HStack(spacing: 8) {
+                            Image(systemName: "camera.viewfinder")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 18)
+                            Text(abbreviatedPath(screenshot.path))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                            Spacer()
+                            Button { editingWatch = screenshot } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                }
+                .padding(6)
+            } label: {
+                Text("Screenshot Shelf")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Anything that arrives in a watched folder goes onto a shelf by itself. Only what lands after OneBar starts watching counts — turning a watch on never empties the folder onto a shelf.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if watchStore.folderWatches.isEmpty {
+                        Text("No folders are being watched")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+                    } else {
+                        ForEach(watchStore.folderWatches) { watch in
+                            watchRow(watch)
+                        }
+                    }
+
+                    Divider()
+
+                    HStack {
+                        Button("Add Folder…") { addWatchedFolder() }
+                            .controlSize(.small)
+                        Spacer()
+                    }
+                }
+                .padding(6)
+            } label: {
+                Text("Watched Folders")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .disabled(!state.shelfEnabled)
+    }
+
+    @ViewBuilder
+    private func watchRow(_ watch: ShelfFolderWatch) -> some View {
+        let missing = watch.resolveURL() == nil
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Toggle("", isOn: enabledBinding(for: watch))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                Text(watch.displayName)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                if missing {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .help("This folder is no longer where it was")
+                }
+                if !watch.rules.rules.isEmpty {
+                    Text(watch.rules.rules.count == 1 ? "1 condition" : "\(watch.rules.rules.count) conditions")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button { editingWatch = watch } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .controlSize(.small)
+                Button { watchStore.remove(watch.id) } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Stop watching this folder")
+            }
+            Text(abbreviatedPath(watch.path))
+                .font(.system(size: 10))
+                .foregroundStyle(missing ? .orange : .secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .padding(.leading, 34)
+        }
+    }
+
+    private func enabledBinding(for watch: ShelfFolderWatch) -> Binding<Bool> {
+        Binding(
+            get: { watch.isEnabled },
+            set: {
+                var updated = watch
+                updated.isEnabled = $0
+                watchStore.update(updated)
+            }
+        )
+    }
+
+    private var screenshotWatchBinding: Binding<Bool> {
+        Binding(
+            get: { watchStore.screenshotWatch != nil },
+            set: { watchStore.setScreenshotWatchEnabled($0) }
+        )
+    }
+
+    private func abbreviatedPath(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    private func addWatchedFolder() {
+        let picker = NSOpenPanel()
+        picker.canChooseFiles = false
+        picker.canChooseDirectories = true
+        picker.allowsMultipleSelection = false
+        picker.message = "Choose a folder to watch"
+        picker.prompt = "Watch"
+        guard picker.runModal() == .OK, let url = picker.url else { return }
+        // Watching the screenshot folder by hand as well would deliver every
+        // screenshot twice.
+        guard !watchStore.conflictsWithScreenshotWatch(url.path) else {
+            HUD.show("That is already the screenshot folder", symbol: "camera.viewfinder")
+            return
+        }
+        guard let added = watchStore.add(path: url.path) else {
+            HUD.show("That folder is already watched", symbol: "folder")
+            return
+        }
+        editingWatch = added
     }
 
     // MARK: - Shelves

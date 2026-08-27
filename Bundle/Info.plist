@@ -29,11 +29,11 @@
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>OneBar sets the volume of individual apps. macOS calls reading an app's audio "recording", which is why it asks — the audio is only played straight back out at the level you picked, and nothing is stored or sent anywhere.</string>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
+	<string>OneBar watches folders you choose — a download, so Prevent Sleep can keep the Mac awake until it finishes, and any folder you ask the shelf to collect files from.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
+	<string>OneBar watches folders you choose — a download, so Prevent Sleep can keep the Mac awake until it finishes, and any folder you ask the shelf to collect files from.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>OneBar watches a download you pick so Prevent Sleep can keep the Mac awake until it finishes.</string>
+	<string>OneBar watches folders you choose — a download, so Prevent Sleep can keep the Mac awake until it finishes, and any folder you ask the shelf to collect files from.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>

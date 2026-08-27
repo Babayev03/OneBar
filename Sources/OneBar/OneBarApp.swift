@@ -93,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SoundService.shared.start()
         AppAudioService.shared.start()
         ShelfManager.shared.start()
+        FolderWatchService.shared.start()
         HotkeyManager.shared.registerFromStore()
     }
 
@@ -114,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppAudioService.shared.tearDown()
         // Persist pinned shelves, then clear only transient files that belong
         // to unpinned shelves. Referenced user files are never removed.
+        FolderWatchService.shared.stop()
         ShelfManager.shared.stop()
         ClipboardManager.shared.saveNow()
     }
