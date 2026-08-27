@@ -185,6 +185,18 @@ final class ShelfManager {
         for controller in shelves.reversed() { close(controller) }
     }
 
+    /// Deletes what OneBar wrote for shelves that no longer exist.
+    ///
+    /// The same pass that runs at launch, offered by hand because a long
+    /// session can accumulate orphans and there is otherwise nothing that
+    /// clears them until the next start.
+    @discardableResult
+    func sweepUnusedFiles() -> Int {
+        let before = ShelfStore.shared.itemsFolderSize()
+        ShelfStore.shared.sweep(keeping: pinned + recent + shelves.map { $0.snapshot() })
+        return max(0, before - ShelfStore.shared.itemsFolderSize())
+    }
+
     /// Drops a snapshot for good, deleting anything OneBar wrote for it.
     func forget(_ snapshot: ShelfSnapshot) {
         recent.removeAll { $0.id == snapshot.id }

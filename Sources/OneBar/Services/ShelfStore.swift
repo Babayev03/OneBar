@@ -217,6 +217,18 @@ final class ShelfStore {
         return contents.reduce(0) { $0 + (fileSize(of: $1) ?? 0) }
     }
 
+    /// What OneBar has written for dropped text and images. These files back
+    /// live shelf items, so this folder is shown but never offered a blanket
+    /// Clear — only `sweep(keeping:)`, which removes what nothing points at.
+    func itemsFolderSize() -> Int {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: itemsDirectory, includingPropertiesForKeys: nil
+        ) else { return 0 }
+        return contents.reduce(0) { $0 + (fileSize(of: $1) ?? 0) }
+    }
+
+    var itemsFolderURL: URL { itemsDirectory }
+
     /// Empties the action folder. Deliberately only its direct contents: this
     /// is the one directory OneBar fills on the user's behalf and never tidies
     /// on its own, since an output is a file they asked for.

@@ -21,6 +21,7 @@ struct ShelfPane: View {
     /// Read once when the pane appears rather than on every redraw: measuring a
     /// folder walks it.
     @State private var outputFolderBytes = 0
+    @State private var itemsFolderBytes = 0
     /// The Preferences preview is the strip itself, so what is shown here and
     /// what appears under a shelf cannot drift apart.
     @State private var previewModel = ShelfInstantActionBarModel()
@@ -54,6 +55,7 @@ struct ShelfPane: View {
         .onAppear {
             refreshNotchAvailability()
             outputFolderBytes = ShelfStore.shared.outputFolderSize()
+            itemsFolderBytes = ShelfStore.shared.itemsFolderSize()
             refreshInstantActionPreview()
         }
         .onChange(of: state.shelfInstantActionIDs) { _, _ in
@@ -282,20 +284,6 @@ struct ShelfPane: View {
                         }
                     }
 
-                    Divider()
-
-                    row(
-                        "OneBar's output folder",
-                        subtitle: "Holds \(outputFolderSize). Nothing here is deleted on its own — an output is a file you asked for. Clearing it leaves any shelf item that still points at one showing as missing."
-                    ) {
-                        HStack(spacing: 6) {
-                            Button("Reveal") { revealOutputFolder() }
-                                .controlSize(.small)
-                            Button("Clear") { clearOutputFolder() }
-                                .controlSize(.small)
-                                .disabled(outputFolderBytes == 0)
-                        }
-                    }
 
                     Divider()
 
@@ -748,6 +736,19 @@ struct ShelfPane: View {
         )
     }
 
+    private func byteString(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private func sweepUnusedFiles() {
+        let freed = ShelfManager.shared.sweepUnusedFiles()
+        itemsFolderBytes = ShelfStore.shared.itemsFolderSize()
+        HUD.show(
+            freed > 0 ? "Removed \(byteString(freed))" : "Nothing to remove",
+            symbol: freed > 0 ? "trash" : "checkmark"
+        )
+    }
+
     private func abbreviatedPath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
@@ -778,6 +779,47 @@ struct ShelfPane: View {
 
     private var shelves: some View {
         VStack(spacing: 14) {
+            GroupBox {
+                VStack(spacing: 10) {
+                    row(
+                        "Dropped text and images",
+                        subtitle: "Holds \(byteString(itemsFolderBytes)). Text and images have no file anywhere, so OneBar writes one for each — that is what lets you drag dropped text into Finder as a real file. Removing unused files deletes only what no shelf points at any more."
+                    ) {
+                        HStack(spacing: 6) {
+                            Button("Reveal") {
+                                NSWorkspace.shared.activateFileViewerSelecting(
+                                    [ShelfStore.shared.itemsFolderURL]
+                                )
+                            }
+                            .controlSize(.small)
+                            Button("Remove Unused") { sweepUnusedFiles() }
+                                .controlSize(.small)
+                                .disabled(itemsFolderBytes == 0)
+                        }
+                    }
+
+                    Divider()
+
+                    row(
+                        "Action output",
+                        subtitle: "Holds \(outputFolderSize). Nothing here is deleted on its own — an output is a file you asked for. Clearing it leaves any shelf item that still points at one showing as missing."
+                    ) {
+                        HStack(spacing: 6) {
+                            Button("Reveal") { revealOutputFolder() }
+                                .controlSize(.small)
+                            Button("Clear") { clearOutputFolder() }
+                                .controlSize(.small)
+                                .disabled(outputFolderBytes == 0)
+                        }
+                    }
+                }
+                .padding(6)
+            } label: {
+                Text("Storage")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     row(
