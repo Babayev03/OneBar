@@ -11,10 +11,10 @@ struct ShortcutsPane: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(spacing: 0) {
-                    group("Global", actions: ShortcutAction.allCases.filter(\.isGlobal))
-
-                    group("Clipboard History", actions: ShortcutAction.allCases.filter { !$0.isGlobal })
-                        .padding(.top, 12)
+                    ForEach(Array(ShortcutAction.Section.allCases.enumerated()), id: \.element) { index, section in
+                        group(section.rawValue, actions: ShortcutAction.actions(in: section))
+                            .padding(.top, index == 0 ? 0 : 12)
+                    }
                 }
                 .padding(20)
             }

@@ -82,44 +82,9 @@ enum QuitConfirmation {
 
         guard let window, window.isVisible else { return }
 
-        if isMenuBarExtra(window), closeMenuBarExtra(window) { return }
+        if MenuBarPopover.isPopover(window), MenuBarPopover.close(window) { return }
 
         // Ordered out rather than closed, so the menu can open it again.
         window.orderOut(nil)
-    }
-
-    // MARK: - The menu popover
-
-    private static func isMenuBarExtra(_ window: NSWindow) -> Bool {
-        String(describing: type(of: window)).hasPrefix("MenuBarExtraWindow")
-    }
-
-    /// MenuBarExtra opens and closes the popover from its status item's own
-    /// button and keeps no other record of whether it is up. Hiding the window
-    /// directly leaves that record saying "open", and the next click on the
-    /// icon is then spent putting it right rather than showing the popover —
-    /// so the button is what gets pressed. Returns false if it can't be found,
-    /// leaving the caller to hide the window the blunt way.
-    ///
-    /// It is picked by position: the popover hangs directly under the item it
-    /// belongs to, which is what tells that item apart from the status items
-    /// Prevent Sleep and Auto Mouse Move add.
-    private static func closeMenuBarExtra(_ popover: NSWindow) -> Bool {
-        let anchor = popover.frame.midX
-        let nearest = NSApp.windows
-            .filter { $0.isVisible && String(describing: type(of: $0)) == "NSStatusBarWindow" }
-            .min { abs($0.frame.midX - anchor) < abs($1.frame.midX - anchor) }
-        guard let button = statusButton(in: nearest?.contentView) else { return false }
-        button.performClick(nil)
-        return true
-    }
-
-    private static func statusButton(in view: NSView?) -> NSStatusBarButton? {
-        guard let view else { return nil }
-        if let button = view as? NSStatusBarButton { return button }
-        for subview in view.subviews {
-            if let found = statusButton(in: subview) { return found }
-        }
-        return nil
     }
 }

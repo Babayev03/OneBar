@@ -203,6 +203,117 @@ final class AppState {
         didSet { UserDefaults.standard.set(quitShortcutBehavior.rawValue, forKey: "quitShortcutBehavior") }
     }
 
+    // MARK: - Shelf
+
+    /// Master switch for the drag-and-drop shelf.
+    var shelfEnabled: Bool {
+        didSet { UserDefaults.standard.set(shelfEnabled, forKey: "shelfEnabled") }
+    }
+
+    /// Shake the cursor mid-drag to summon a shelf under it.
+    var shelfShakeEnabled: Bool {
+        didSet { UserDefaults.standard.set(shelfShakeEnabled, forKey: "shelfShakeEnabled") }
+    }
+
+    var shelfShakeSensitivity: ShakeSensitivity {
+        didSet { UserDefaults.standard.set(shelfShakeSensitivity.rawValue, forKey: "shelfShakeSensitivity") }
+    }
+
+    /// Where a shelf lands when it was not summoned by a shake.
+    var shelfLocation: ShelfLocation {
+        didSet { UserDefaults.standard.set(shelfLocation.rawValue, forKey: "shelfLocation") }
+    }
+
+    /// Drop formatted text as plain text rather than keeping its styling.
+    var shelfPlainText: Bool {
+        didSet { UserDefaults.standard.set(shelfPlainText, forKey: "shelfPlainText") }
+    }
+
+    /// Override the macOS default of moving within a volume and copying across
+    /// one, so dragging out never removes the original.
+    var shelfAlwaysCopy: Bool {
+        didSet { UserDefaults.standard.set(shelfAlwaysCopy, forKey: "shelfAlwaysCopy") }
+    }
+
+    var shelfCloseBehavior: ShelfCloseBehavior {
+        didSet { UserDefaults.standard.set(shelfCloseBehavior.rawValue, forKey: "shelfCloseBehavior") }
+    }
+
+    /// Give each open shelf its own colour so two are told apart at a glance.
+    var shelfColorLabels: Bool {
+        didSet { UserDefaults.standard.set(shelfColorLabels, forKey: "shelfColorLabels") }
+    }
+
+    /// Layout a new shelf starts in; each shelf can then be switched on its own.
+    var shelfLayout: ShelfLayout {
+        didSet { UserDefaults.standard.set(shelfLayout.rawValue, forKey: "shelfLayout") }
+    }
+
+    /// Move a new shelf aside once after its first accepted drop.
+    var shelfAutoRetract: Bool {
+        didSet { UserDefaults.standard.set(shelfAutoRetract, forKey: "shelfAutoRetract") }
+    }
+
+    /// How many shelves may be open at once. Each one is a live window that
+    /// redraws with everything else on screen, so a large number of them is
+    /// felt rather than merely counted.
+    var shelfMaxCount: Int {
+        didSet { UserDefaults.standard.set(shelfMaxCount, forKey: "shelfMaxCount") }
+    }
+
+    /// Where an automatic retract sends a shelf. Nearest is where it lands
+    /// otherwise, which depends on where the shake happened and so is never
+    /// twice the same place.
+    var shelfAutoRetractEdge: ShelfCollapseEdge {
+        didSet {
+            UserDefaults.standard.set(shelfAutoRetractEdge.rawValue, forKey: "shelfAutoRetractEdge")
+        }
+    }
+
+    /// Align a shelf to display edges and nearby shelves after a user drag.
+    var shelfSnap: Bool {
+        didSet { UserDefaults.standard.set(shelfSnap, forKey: "shelfSnap") }
+    }
+
+    var shelfDoubleClick: ShelfDoubleClickAction {
+        didSet { UserDefaults.standard.set(shelfDoubleClick.rawValue, forKey: "shelfDoubleClick") }
+    }
+
+    /// New shelves normally join every Space; this keeps them in the Space in
+    /// which they were opened instead.
+    var shelfKeepInSpace: Bool {
+        didSet { UserDefaults.standard.set(shelfKeepInSpace, forKey: "shelfKeepInSpace") }
+    }
+
+    var shelfNotchDrop: Bool {
+        didSet { UserDefaults.standard.set(shelfNotchDrop, forKey: "shelfNotchDrop") }
+    }
+
+    /// Where the transform actions write. Empty means OneBar's own folder.
+    var shelfOutputFolder: String {
+        didSet { UserDefaults.standard.set(shelfOutputFolder, forKey: "shelfOutputFolder") }
+    }
+
+    var shelfOutputReveal: ShelfOutputReveal {
+        didSet { UserDefaults.standard.set(shelfOutputReveal.rawValue, forKey: "shelfOutputReveal") }
+    }
+
+    var shelfNotchHighlight: NotchHighlight {
+        didSet { UserDefaults.standard.set(shelfNotchHighlight.rawValue, forKey: "shelfNotchHighlight") }
+    }
+
+    /// Show a row of action buttons under a shelf summoned mid-drag, so a drop
+    /// can go straight to an action instead of onto the shelf.
+    var shelfInstantActions: Bool {
+        didSet { UserDefaults.standard.set(shelfInstantActions, forKey: "shelfInstantActions") }
+    }
+
+    /// Which buttons the strip shows, in order. Stored as ids rather than
+    /// titles so a reworded action keeps the button the user put there.
+    var shelfInstantActionIDs: [String] {
+        didSet { UserDefaults.standard.set(shelfInstantActionIDs, forKey: "shelfInstantActionIDs") }
+    }
+
     /// Selection-highlight accent in the clipboard panel.
     var accentName: String {
         didSet { UserDefaults.standard.set(accentName, forKey: "accentName") }
@@ -274,7 +385,28 @@ final class AppState {
             "brightnessSoftwareFallback": true,
             "colorPickerFormat": "hex",
             "quitShortcutBehavior": "ask",
-            "accentName": "blue"
+            "accentName": "blue",
+            "shelfEnabled": true,
+            "shelfShakeEnabled": true,
+            "shelfShakeSensitivity": "normal",
+            "shelfLocation": "cursor",
+            "shelfPlainText": false,
+            "shelfAlwaysCopy": false,
+            "shelfCloseBehavior": "whenMoved",
+            "shelfColorLabels": true,
+            "shelfLayout": "grid",
+            "shelfAutoRetract": false,
+            "shelfAutoRetractEdge": "right",
+            "shelfMaxCount": 5,
+            "shelfSnap": true,
+            "shelfDoubleClick": "dock",
+            "shelfKeepInSpace": false,
+            "shelfNotchDrop": true,
+            "shelfNotchHighlight": "onHover",
+            "shelfOutputFolder": "",
+            "shelfOutputReveal": "shelf",
+            "shelfInstantActions": true,
+            "shelfInstantActionIDs": ShelfInstantAction.defaultIDs
         ])
         systemMonitoringEnabled = defaults.bool(forKey: "systemMonitoringEnabled")
         clipboardEnabled = defaults.bool(forKey: "clipboardEnabled")
@@ -316,5 +448,35 @@ final class AppState {
         colorPickerFormat = ColorFormat(rawValue: defaults.string(forKey: "colorPickerFormat") ?? "") ?? .hex
         quitShortcutBehavior = QuitShortcutBehavior(rawValue: defaults.string(forKey: "quitShortcutBehavior") ?? "") ?? .ask
         accentName = defaults.string(forKey: "accentName") ?? "blue"
+        shelfEnabled = defaults.bool(forKey: "shelfEnabled")
+        shelfShakeEnabled = defaults.bool(forKey: "shelfShakeEnabled")
+        shelfShakeSensitivity = ShakeSensitivity(rawValue: defaults.string(forKey: "shelfShakeSensitivity") ?? "") ?? .normal
+        shelfLocation = ShelfLocation(rawValue: defaults.string(forKey: "shelfLocation") ?? "") ?? .cursor
+        shelfPlainText = defaults.bool(forKey: "shelfPlainText")
+        shelfAlwaysCopy = defaults.bool(forKey: "shelfAlwaysCopy")
+        shelfCloseBehavior = ShelfCloseBehavior(rawValue: defaults.string(forKey: "shelfCloseBehavior") ?? "") ?? .whenMoved
+        shelfColorLabels = defaults.bool(forKey: "shelfColorLabels")
+        shelfLayout = ShelfLayout(rawValue: defaults.string(forKey: "shelfLayout") ?? "") ?? .grid
+        shelfAutoRetract = defaults.bool(forKey: "shelfAutoRetract")
+        shelfMaxCount = max(1, defaults.integer(forKey: "shelfMaxCount"))
+        shelfAutoRetractEdge = ShelfCollapseEdge(
+            rawValue: defaults.string(forKey: "shelfAutoRetractEdge") ?? ""
+        ) ?? .right
+        shelfSnap = defaults.bool(forKey: "shelfSnap")
+        shelfDoubleClick = ShelfDoubleClickAction(
+            rawValue: defaults.string(forKey: "shelfDoubleClick") ?? ""
+        ) ?? .dock
+        shelfKeepInSpace = defaults.bool(forKey: "shelfKeepInSpace")
+        shelfNotchDrop = defaults.bool(forKey: "shelfNotchDrop")
+        shelfOutputFolder = defaults.string(forKey: "shelfOutputFolder") ?? ""
+        shelfOutputReveal = ShelfOutputReveal(
+            rawValue: defaults.string(forKey: "shelfOutputReveal") ?? ""
+        ) ?? .shelf
+        shelfNotchHighlight = NotchHighlight(
+            rawValue: defaults.string(forKey: "shelfNotchHighlight") ?? ""
+        ) ?? .onHover
+        shelfInstantActions = defaults.bool(forKey: "shelfInstantActions")
+        shelfInstantActionIDs = defaults.stringArray(forKey: "shelfInstantActionIDs")
+            ?? ShelfInstantAction.defaultIDs
     }
 }

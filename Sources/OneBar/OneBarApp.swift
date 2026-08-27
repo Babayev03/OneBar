@@ -18,6 +18,12 @@ struct OneBarApp: App {
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
+        // An `onebar://` link would otherwise put this window on screen every
+        // time one fired: SwiftUI routes an incoming URL to a scene, and with
+        // only one window scene declared this is the scene it picks. Matching
+        // nothing takes it out of that running — the URL is handled by the app
+        // delegate, which needs no window at all.
+        .handlesExternalEvents(matching: [])
         // Replacing SwiftUI's own Quit item is what puts the confirmation in
         // front of ⌘Q. The menu is never drawn — an accessory app has none —
         // but its key equivalents still fire while one of our windows is key,
@@ -92,7 +98,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppMixer.destroyLegacyGroupDevices()
         SoundService.shared.start()
         AppAudioService.shared.start()
+        ShelfManager.shared.start()
+        FolderWatchService.shared.start()
         HotkeyManager.shared.registerFromStore()
+        ShelfIntegrations.shared.start()
+    }
+
+    /// Opening an `onebar://` link activates the app, and activating an
+    /// accessory app that has no windows makes AppKit put one up for it —
+    /// which here means Preferences appearing every time a link fires.
+    /// Nothing about this app wants a window restored on activation: every
+    /// window it has is opened deliberately by the thing that needs it.
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        false
+    }
+
+    /// `onebar://` links, from Alfred, Raycast, a shortcut, or anything else
+    /// that can open a URL.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { ShelfIntegrations.shared.handle(url) }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -111,6 +138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Taps mute the apps they are on, so leaving one behind would leave an
         // app silent with nothing left to un-silence it.
         AppAudioService.shared.tearDown()
+        // Persist pinned shelves, then clear only transient files that belong
+        // to unpinned shelves. Referenced user files are never removed.
+        FolderWatchService.shared.stop()
+        ShelfManager.shared.stop()
         ClipboardManager.shared.saveNow()
     }
 }

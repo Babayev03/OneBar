@@ -1,0 +1,303 @@
+import AppKit
+import Foundation
+import UniformTypeIdentifiers
+
+/// Files OneBar writes on a shelf's behalf.
+///
+/// A shelf holds references, so this only ever sees the drops that arrive as
+/// raw bytes — selected text, an image dragged out of a browser, a promised
+/// file from Photos or Mail. Those have no file anywhere, and without one they
+/// could never be dragged into Finder.
+final class ShelfStore {
+    static let shared = ShelfStore()
+
+    /// Beside `history.json` and `click-layouts.json`, for the same reason: a
+    /// stashed file is the sort of thing worth being able to find on disk.
+    let itemsDirectory: URL
+    /// Where the transform actions write. Deliberately *not* `shelf-items`:
+    /// these are files the user asked for and can go looking for, not OneBar's
+    /// bookkeeping, so removing an item from a shelf must not delete one.
+    let outputDirectory: URL
+    private let shelvesURL: URL
+
+    /// Pinned shelves come back at the next launch; recents are the short
+    /// undo list for a shelf closed by accident.
+    struct Persisted: Codable {
+        var pinned: [ShelfSnapshot] = []
+        var recent: [ShelfSnapshot] = []
+
+        init(pinned: [ShelfSnapshot] = [], recent: [ShelfSnapshot] = []) {
+            self.pinned = pinned
+            self.recent = recent
+        }
+
+        private enum CodingKeys: String, CodingKey { case pinned, recent }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            pinned = try container.decodeIfPresent([ShelfSnapshot].self, forKey: .pinned) ?? []
+            recent = try container.decodeIfPresent([ShelfSnapshot].self, forKey: .recent) ?? []
+        }
+    }
+
+    private convenience init() {
+        self.init(baseDirectory: ClipboardStore.shared.baseDirectory)
+    }
+
+    /// Internal for isolated persistence tests; production uses `shared`.
+    init(baseDirectory base: URL) {
+        itemsDirectory = base.appendingPathComponent("shelf-items", isDirectory: true)
+        outputDirectory = base.appendingPathComponent("action-output", isDirectory: true)
+        shelvesURL = base.appendingPathComponent("shelves.json")
+        try? FileManager.default.createDirectory(at: itemsDirectory, withIntermediateDirectories: true)
+    }
+
+    func loadPersisted() -> Persisted {
+        guard let data = try? Data(contentsOf: shelvesURL),
+              let decoded = try? JSONDecoder().decode(Persisted.self, from: data)
+        else { return Persisted() }
+        return decoded
+    }
+
+    func savePersisted(_ persisted: Persisted) {
+        guard let data = try? JSONEncoder().encode(persisted) else { return }
+        try? data.write(to: shelvesURL, options: .atomic)
+    }
+
+    /// Writes `data` into a uniquely-named subfolder so the file keeps the name
+    /// the user will see in Finder — two drops called `Screenshot.png` must not
+    /// collide, and renaming one of them to `Screenshot-2.png` would be a lie
+    /// about what was dragged.
+    func materialise(_ data: Data, name: String) -> URL? {
+        let folder = itemsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent(sanitised(name))
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    /// Somewhere a promised file can be delivered before it becomes an item.
+    func promiseDestination() -> URL? {
+        let folder = itemsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
+        else { return nil }
+        return folder
+    }
+
+    /// Removes an abandoned promise delivery directory. It is deliberately
+    /// restricted to a direct child of `shelf-items`.
+    func discardPromiseDestination(_ url: URL) {
+        guard isDirectChildOfItemsDirectory(url) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Moves one delivered promise out of the shared batch directory and into
+    /// its own ownership directory. Removing that item can then never delete a
+    /// sibling promised by the same drag.
+    func adoptPromisedFile(at source: URL, from batchDirectory: URL) -> URL? {
+        guard isDirectChildOfItemsDirectory(batchDirectory),
+              source.deletingLastPathComponent().standardizedFileURL
+                == batchDirectory.standardizedFileURL
+        else { return nil }
+
+        let itemDirectory = itemsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let destination = itemDirectory.appendingPathComponent(source.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: itemDirectory, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: source, to: destination)
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: itemDirectory)
+            return nil
+        }
+    }
+
+    /// Deletes only what we wrote. A referenced file is the user's, and removing
+    /// an item from a shelf must never touch it.
+    func discard(_ items: [ShelfItem], keeping retainedItems: [ShelfItem] = []) {
+        let retainedPaths = Set(retainedItems.compactMap { item -> String? in
+            guard item.isMaterialised, let path = item.path else { return nil }
+            return URL(fileURLWithPath: path).standardizedFileURL.path
+        })
+        for item in items where item.isMaterialised {
+            guard let path = item.path else { continue }
+            let url = URL(fileURLWithPath: path)
+            // A recovered snapshot can contain the exact materialisation that
+            // is already represented in the destination shelf. Rejecting that
+            // duplicate must not delete the file underneath the retained item.
+            guard !retainedPaths.contains(url.standardizedFileURL.path) else { continue }
+            let folder = url.deletingLastPathComponent()
+            // Never trust the persisted flag alone: deletion is only allowed
+            // inside OneBar's own shelf-items directory.
+            if isDirectChildOfItemsDirectory(folder) {
+                try? FileManager.default.removeItem(at: folder)
+            } else if isDirectChildOfItemsDirectory(url) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    /// Makes an independent item for Option-copy between shelves. Referenced
+    /// user files keep pointing at the original; OneBar-owned materializations
+    /// are physically cloned so either shelf can later delete its own copy.
+    func copyForShelf(_ item: ShelfItem) -> ShelfItem? {
+        guard item.isMaterialised, let path = item.path else {
+            return duplicate(item, path: item.path, bookmark: item.bookmark, materialised: false)
+        }
+
+        let source = URL(fileURLWithPath: path)
+        guard ownsMaterialisation(at: source) else {
+            // A corrupt legacy flag must never turn a user file into something
+            // OneBar believes it owns.
+            return duplicate(item, path: item.path, bookmark: item.bookmark, materialised: false)
+        }
+        guard FileManager.default.fileExists(atPath: source.path),
+              let destinationFolder = promiseDestination()
+        else { return nil }
+
+        let destination = destinationFolder.appendingPathComponent(source.lastPathComponent)
+        do {
+            try FileManager.default.copyItem(at: source, to: destination)
+            return duplicate(
+                item,
+                path: destination.path,
+                bookmark: try? destination.bookmarkData(),
+                materialised: true,
+                byteSize: fileSize(of: destination)
+            )
+        } catch {
+            discardPromiseDestination(destinationFolder)
+            return nil
+        }
+    }
+
+    /// Deletes every materialised file not belonging to a shelf that survived.
+    /// Run at launch, where anything unaccounted for is the residue of a shelf
+    /// that was open when the app last quit.
+    func sweep(keeping snapshots: [ShelfSnapshot]) {
+        let kept = Set(snapshots.flatMap(\.items).compactMap { item -> String? in
+            guard item.isMaterialised, let path = item.path else { return nil }
+            return URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
+        })
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: itemsDirectory, includingPropertiesForKeys: nil
+        ) else { return }
+        for url in contents where !kept.contains(url.lastPathComponent) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// A free name inside `action-output`, creating the directory on first use
+    /// so an unused install never carries an empty folder.
+    func outputURL(base: String, extension ext: String, in folder: URL? = nil) -> URL? {
+        let directory = folder ?? outputDirectory
+        guard (try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true
+        )) != nil else { return nil }
+        // Writing into a folder the user chose must never overwrite what is
+        // already in it, which is the whole reason names are made unique.
+        let name = ShelfOutputNaming.unique(base: base, extension: ext) { candidate in
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent(candidate).path
+            )
+        }
+        return directory.appendingPathComponent(name)
+    }
+
+    /// What the action folder is holding, so it can be seen before it is
+    /// cleared. Zero when nothing has ever been written.
+    func outputFolderSize() -> Int {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: outputDirectory, includingPropertiesForKeys: nil
+        ) else { return 0 }
+        return contents.reduce(0) { $0 + (fileSize(of: $1) ?? 0) }
+    }
+
+    /// What OneBar has written for dropped text and images. These files back
+    /// live shelf items, so this folder is shown but never offered a blanket
+    /// Clear — only `sweep(keeping:)`, which removes what nothing points at.
+    func itemsFolderSize() -> Int {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: itemsDirectory, includingPropertiesForKeys: nil
+        ) else { return 0 }
+        return contents.reduce(0) { $0 + (fileSize(of: $1) ?? 0) }
+    }
+
+    var itemsFolderURL: URL { itemsDirectory }
+
+    /// Empties the action folder. Deliberately only its direct contents: this
+    /// is the one directory OneBar fills on the user's behalf and never tidies
+    /// on its own, since an output is a file they asked for.
+    @discardableResult
+    func clearOutputFolder() -> Int {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: outputDirectory, includingPropertiesForKeys: nil
+        ) else { return 0 }
+        var removed = 0
+        for url in contents where (try? FileManager.default.removeItem(at: url)) != nil {
+            removed += 1
+        }
+        return removed
+    }
+
+    func fileSize(of url: URL) -> Int? {
+        let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .fileSizeKey, .isDirectoryKey]
+        guard let values = try? url.resourceValues(forKeys: keys) else { return nil }
+        if values.isDirectory == true { return directorySize(of: url) }
+        return values.totalFileAllocatedSize ?? values.fileSize
+    }
+
+    /// A folder's own size never moves however much is inside it, so a dropped
+    /// folder has to be measured by its contents to show anything useful.
+    private func directorySize(of url: URL) -> Int? {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey]
+        ) else { return nil }
+        var total = 0
+        for case let child as URL in enumerator {
+            let values = try? child.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileSizeKey])
+            total += values?.totalFileAllocatedSize ?? values?.fileSize ?? 0
+        }
+        return total
+    }
+
+    private func sanitised(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = trimmed.replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        return cleaned.isEmpty ? "Untitled" : String(cleaned.prefix(200))
+    }
+
+    private func isDirectChildOfItemsDirectory(_ url: URL) -> Bool {
+        url.deletingLastPathComponent().standardizedFileURL == itemsDirectory.standardizedFileURL
+    }
+
+    private func ownsMaterialisation(at url: URL) -> Bool {
+        isDirectChildOfItemsDirectory(url) || isDirectChildOfItemsDirectory(url.deletingLastPathComponent())
+    }
+
+    private func duplicate(
+        _ item: ShelfItem,
+        path: String?,
+        bookmark: Data?,
+        materialised: Bool,
+        byteSize: Int? = nil
+    ) -> ShelfItem {
+        ShelfItem(
+            kind: item.kind,
+            path: path,
+            bookmark: bookmark,
+            text: item.text,
+            rtfData: item.rtfData,
+            linkString: item.linkString,
+            title: item.title,
+            byteSize: byteSize ?? item.byteSize,
+            addedAt: Date(),
+            isMaterialised: materialised
+        )
+    }
+}

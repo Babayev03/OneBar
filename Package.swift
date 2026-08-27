@@ -14,6 +14,14 @@ let package = Package(
                 .swiftLanguageMode(.v5),
                 .unsafeFlags(["-parse-as-library"])
             ]
+        ),
+        .testTarget(
+            name: "OneBarTests",
+            dependencies: ["OneBar"],
+            path: "Tests/OneBarTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
         )
     ]
 )
