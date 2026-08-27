@@ -56,9 +56,14 @@ Drag a file from one window to another without both being visible at once. **Sha
 - **Grid or list**, multi-selection, Quick Look, and per-item actions: Open, Open With, Show in Finder, **rename in place** (Finder-style — the base name is selected, the extension is not), Copy, Move to New Shelf, **Share** via the real AirDrop / Mail / Messages sheet, and Move to Trash
 - **Transform actions**: **Compress** to a zip, **convert or resize images** (JPEG / PNG / HEIC / TIFF / AVIF, plus **WebP** where `cwebp` is installed — presets or your own size and quality, and resizing keeps the format it already was and never upscales), **remove metadata** (strips EXIF, GPS and camera tags without re-encoding the image), and **merge PDFs and images into one PDF**. Results go to a folder of your choosing and can land on the shelf, in Finder, or both; **your originals are never touched**
 - **⌘K command bar** — type what you want done instead of hunting for it: "zip" finds Compress, "delete" finds Move to Trash, "webp" converts straight to WebP. Only what is currently possible is listed
+- **Instant actions** — a row of buttons appears under any shelf a drag is hovering. Drop onto one and the files go **straight through that action** without ever landing on the shelf: shake, drop on **Zip**, done. Buttons that cannot apply to what you are dragging are dimmed, and you choose which ones appear
+- **Your own actions** — register a shell script or an Automator workflow and it becomes another button, beside Zip and Share, in the menus and in ⌘K. Your files arrive as arguments and anything the script leaves in `$ONEBAR_OUTPUT_DIR` comes back onto the shelf. Four lines of shell is enough to add "resize to exactly my size", "rename in my pattern", or "convert this video"
+- **Watched folders** — point OneBar at a folder and anything arriving in it lands on a shelf by itself, with rules: only `.png`, only over 5 MB, only names containing "invoice". Turning a watch on never empties the folder onto a shelf, and a file is taken only once it has finished being written
+- **Screenshot shelf** — every screenshot you take goes onto a shelf as well as into the folder. Follows wherever macOS is set to save them
+- **Without dragging at all** — Finder ▸ right-click ▸ **Services ▸ Add to OneBar Shelf**, or an `onebar://` link from a launcher, a shortcut or a script: `onebar://shelf/new`, `onebar://shelf/add?path=…`, `onebar://shelf/close`
 - **Get Info** for the selected item — kind, size, pixel dimensions, location and dates — and **Copy Path**
 - **Ignored apps** — add an app and shaking inside it never summons a shelf
-- Needs **no permission at all**: watching for a shake uses mouse monitors, and only *keyboard* monitors require Accessibility
+- **Drag, drop and act needs no permission at all**: watching for a shake uses mouse monitors, and only *keyboard* monitors require Accessibility. Only watched folders ask for anything, and only for the folder you chose
 
 | Key | Action |
 | --- | --- |
@@ -163,7 +168,9 @@ macOS will ask for these on first use of the corresponding feature:
 - **System Audio Recording** — required only for **per-app volume**. macOS calls reading an app's audio "recording"; it is played straight back out at the level you picked, and nothing is stored or sent anywhere
 - **Microphone** — only if you switch on the input level meter, and only while the Sound screen is open
 
-Display brightness, Pick color and the Shelf need **none of them** — DDC/CI, the built-in backlight, the system color sampler and mouse-only event monitors are all permission-free.
+- **Files and folders** — only if you use **watched folders** or the **screenshot shelf**, and only for the folder you point them at (Desktop, Documents or Downloads prompt on first use)
+
+Display brightness, Pick color and the rest of the Shelf need **none of them** — DDC/CI, the built-in backlight, the system color sampler and mouse-only event monitors are all permission-free.
 
 Everything runs **100% on-device**. OneBar makes no network requests, ever.
 
@@ -173,7 +180,10 @@ Everything runs **100% on-device**. OneBar makes no network requests, ever.
 - Live menubar stats, update frequency, ring thresholds
 - Image limit & optional history cap
 - Ignored apps
-- Shelf: shake on/off and sensitivity, drop-to-notch and its highlight, where a shelf opens, grid or list, keep dropped text as plain text, always copy when dragging out, when to close after a drag out, retract after the first drop, snap on move, what double-clicking a shelf edge does, per-shelf colours, and its own ignored-apps list
+- Shelf: shake on/off and sensitivity, drop-to-notch and its highlight, where a shelf opens, grid or list, keep dropped text as plain text, always copy when dragging out, when to close after a drag out, retract after the first drop, snap on move, what double-clicking a shelf edge does, per-shelf colours, the maximum number of shelves at once, and its own ignored-apps list
+- Shelf actions: which instant-action buttons appear and in what order, and your own scripts and Automator workflows — each with a name, an icon and its own editor
+- Shelf folders: the screenshot shelf, and any number of watched folders with their own rules, subfolder and one-shelf-per-file options
+- Shelf storage: what OneBar has written for dropped text and images, and what its actions have produced — with Reveal, Remove Unused and Clear
 - Fully remappable shortcuts, including global ones for the clipboard panel (`⌘H`), the Auto Click canvas (`⌥⌘C`), turbo click (`⌥⌘T`) and pick color (`⌥⌘P`)
 - What `⌘Q` does — ask first, quit, or do nothing (the Quit button in the menu always quits)
 - Keyboard-cleaning duration, prevent-sleep auto-off and display-sleep behavior, accent color
