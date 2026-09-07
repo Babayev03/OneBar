@@ -81,10 +81,11 @@ final class ShelfManager {
     @discardableResult
     func newShelf(
         at point: NSPoint?,
+        displayTarget: ShelfDisplayTarget? = nil,
         focus: ShelfFocusIntent = .immediate
     ) -> ShelfController? {
         guard AppState.shared.shelfEnabled, !refuseOverLimit() else { return nil }
-        let controller = ShelfController(at: point, focus: focus)
+        let controller = ShelfController(at: point, displayTarget: displayTarget, focus: focus)
         controller.model.colorSource = .automatic
         if AppState.shared.shelfColorLabels {
             controller.model.colorName = nextColorName()
@@ -95,12 +96,15 @@ final class ShelfManager {
 
     func newShelfFromClipboard() {
         guard AppState.shared.shelfEnabled else { return }
+        // The pointer moves while the pasteboard is read; the shelf belongs to
+        // the display the request came from, not wherever the cursor ends up.
+        let displayTarget = ShelfDisplayTarget.capture()
         ShelfItemReader.read(from: NSPasteboard.general) { items in
             guard !items.isEmpty else {
                 HUD.show("Nothing on the clipboard", symbol: "exclamationmark.circle")
                 return
             }
-            guard let shelf = ShelfManager.shared.newShelf(at: nil) else {
+            guard let shelf = ShelfManager.shared.newShelf(at: nil, displayTarget: displayTarget) else {
                 ShelfStore.shared.discard(items)
                 return
             }

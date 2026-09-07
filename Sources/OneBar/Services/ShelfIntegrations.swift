@@ -106,12 +106,13 @@ final class ShelfIntegrations: NSObject {
             error.pointee = "The shelf is turned off in OneBar's settings." as NSString
             return
         }
+        let displayTarget = ShelfDisplayTarget.capture()
         ShelfItemReader.read(from: pasteboard) { items in
             guard !items.isEmpty else {
                 HUD.show("Nothing to put on a shelf", symbol: "exclamationmark.circle")
                 return
             }
-            Self.deliver(items, toNewShelf: userData == "new")
+            Self.deliver(items, toNewShelf: userData == "new", displayTarget: displayTarget)
         }
     }
 
@@ -165,9 +166,13 @@ final class ShelfIntegrations: NSObject {
     /// Joins the shelf that is already open unless a new one was asked for.
     /// Sending five files from Finder one at a time should build one shelf, not
     /// five, and five is the limit.
-    private static func deliver(_ items: [ShelfItem], toNewShelf: Bool) {
+    private static func deliver(
+        _ items: [ShelfItem],
+        toNewShelf: Bool,
+        displayTarget: ShelfDisplayTarget? = nil
+    ) {
         let existing = toNewShelf ? nil : ShelfManager.shared.shelves.last
-        guard let shelf = existing ?? ShelfManager.shared.newShelf(at: nil) else {
+        guard let shelf = existing ?? ShelfManager.shared.newShelf(at: nil, displayTarget: displayTarget) else {
             ShelfStore.shared.discard(items)
             return
         }
