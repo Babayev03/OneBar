@@ -91,6 +91,9 @@ final class ShelfController {
     private var shelfWasKeyBeforePreview = false
     private var hoverMonitors: [Any] = []
     private var collapseVisibleFrame: NSRect?
+    private var displayTarget: ShelfDisplayTarget
+    private var autoRetractAfterMove = false
+    private var resizeAfterMove = false
     private var collapseStackDepth = 0
     private var peekTask: Task<Void, Never>?
     private var expansionTask: Task<Void, Never>?
@@ -131,16 +134,26 @@ final class ShelfController {
 
     private static let dockAnimationDuration = 0.22
 
-    convenience init(at point: NSPoint?, focus: ShelfFocusIntent = .immediate) {
-        self.init(snapshot: nil, at: point, focus: focus)
+    convenience init(
+        at point: NSPoint?,
+        displayTarget: ShelfDisplayTarget? = nil,
+        focus: ShelfFocusIntent = .immediate
+    ) {
+        self.init(snapshot: nil, at: point, displayTarget: displayTarget, focus: focus)
     }
 
     convenience init(snapshot: ShelfSnapshot, focus: ShelfFocusIntent = .none) {
-        self.init(snapshot: snapshot, at: nil, focus: focus)
+        self.init(snapshot: snapshot, at: nil, displayTarget: nil, focus: focus)
     }
 
-    private init(snapshot: ShelfSnapshot?, at point: NSPoint?, focus: ShelfFocusIntent) {
+    private init(
+        snapshot: ShelfSnapshot?,
+        at point: NSPoint?,
+        displayTarget: ShelfDisplayTarget?,
+        focus: ShelfFocusIntent
+    ) {
         id = snapshot?.id ?? UUID()
+        self.displayTarget = displayTarget ?? .capture(at: point)
         placedAtCursor = snapshot == nil && point != nil
         if let snapshot {
             model.items = snapshot.items
@@ -188,10 +201,11 @@ final class ShelfController {
 
         panel.setContentSize(NSSize(width: Self.width, height: desiredHeight()))
         if let snapshot, let x = snapshot.originX, let y = snapshot.originY {
-            panel.setFrame(clampedToScreen(NSRect(
-                origin: NSPoint(x: x, y: y),
-                size: panel.frame.size
-            )), display: false)
+            let restoredFrame = NSRect(origin: NSPoint(x: x, y: y), size: panel.frame.size)
+            self.displayTarget.followWindow(
+                restoredFrame, displays: ShelfDisplay.connected, cursor: NSEvent.mouseLocation
+            )
+            panel.setFrame(clampedToScreen(restoredFrame), display: false)
         } else {
             position(near: point)
         }
@@ -223,7 +237,7 @@ final class ShelfController {
         installKeyMonitor()
         installClickMonitor()
         observePosition(of: panel)
-        observeScreenChanges(of: panel)
+        observeScreenChanges()
         applyCollectionBehavior()
     }
 
@@ -591,7 +605,7 @@ final class ShelfController {
             autoRetractTask?.cancel()
             autoRetractTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(350))
-                guard let self, self.isActive, self.model.collapse == nil else { return }
+                guard !Task.isCancelled, let self, self.isActive, self.model.collapse == nil else { return }
                 // A settled edge, not the nearest one: a shake happens wherever
                 // the pointer is, so "nearest" put every shelf somewhere else.
                 self.autoRetract()
@@ -977,10 +991,22 @@ final class ShelfController {
             commandSuppressed: snapSuppressedForMove || modifiers.contains(.command)
         )
         let shouldReclamp = needsScreenReclamp
+        if isUserMoving, let panel {
+            displayTarget.followWindow(
+                panel.frame, displays: ShelfDisplay.connected, cursor: NSEvent.mouseLocation
+            )
+        }
+        let shouldAutoRetract = autoRetractAfterMove
+        autoRetractAfterMove = false
         needsScreenReclamp = false
         cancelUserMoveTracking()
+        if resizeAfterMove {
+            resizeAfterMove = false
+            resize()
+        }
         if shouldSnap { snapIntoPlace() }
         else if shouldReclamp { reclampForScreens() }
+        if shouldAutoRetract { autoRetract() }
     }
 
     private func cancelUserMoveTracking() {
@@ -991,7 +1017,10 @@ final class ShelfController {
         snapSuppressedForMove = false
     }
 
-    private func observeScreenChanges(of panel: NSPanel) {
+    private func observeScreenChanges() {
+        // Window screen-change notifications also fire as our collapse
+        // animation crosses a shared edge. Only topology changes require
+        // recovery; finishUserMove handles deliberate moves between displays.
         screenObservers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -999,24 +1028,10 @@ final class ShelfController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.handleScreenChange() }
         })
-        screenObservers.append(NotificationCenter.default.addObserver(
-            forName: NSWindow.didChangeScreenNotification,
-            object: panel,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self,
-                      !self.isUserMoving,
-                      !self.userMoveCandidate,
-                      NSEvent.pressedMouseButtons & 1 == 0
-                else { return }
-                self.reclampForScreens()
-            }
-        })
     }
 
     private func handleScreenChange() {
-        if isUserMoving || userMoveCandidate || NSEvent.pressedMouseButtons & 1 == 1 {
+        if isUserMoving || userMoveCandidate {
             needsScreenReclamp = true
         } else {
             reclampForScreens()
@@ -1114,6 +1129,11 @@ final class ShelfController {
     /// so without this every shelf ends up at a different height along the edge
     /// and none of them stack together.
     func autoRetract() {
+        // Let a deliberate move finish before choosing the edge destination.
+        if userMoveCandidate || isUserMoving {
+            autoRetractAfterMove = true
+            return
+        }
         var anchor: CGFloat?
         // A shake puts the shelf under the pointer, which is nowhere in
         // particular, and it keeps that height all the way to the edge. Every
@@ -1482,17 +1502,18 @@ final class ShelfController {
 
     func reclampForScreens() {
         guard let panel else { return }
-        let screenReference = model.collapse == nil ? panel.frame : (collapseVisibleFrame ?? panel.frame)
-        guard let visible = ShelfWindowGeometry.targetVisibleFrame(
-                for: screenReference,
-                visibleFrames: NSScreen.screens.map(\.visibleFrame),
-                cursor: NSEvent.mouseLocation
-              )
-        else { return }
+        guard let visible = visibleFrame(for: collapseVisibleFrame ?? panel.frame) else { return }
 
         var target = ShelfWindowGeometry.clamped(panel.frame, to: visible)
         if let mode = model.collapse, let edge = model.collapseEdge {
             collapseVisibleFrame = visible
+            if let collapseRow {
+                target.origin.y = ShelfWindowGeometry.clamped(
+                    NSRect(x: target.minX, y: collapseRow, width: target.width, height: target.height),
+                    to: visible
+                ).minY
+                self.collapseRow = target.minY
+            }
             target = model.isPeeking
                 ? ShelfWindowGeometry.peeked(
                     target,
@@ -1510,14 +1531,11 @@ final class ShelfController {
                 )
         }
         setFrame(target, animated: false)
+        ShelfManager.shared.restackCollapsedShelves(animated: false)
     }
 
     private func collapseDisplayFrame(fallback frame: NSRect) -> NSRect? {
-        ShelfWindowGeometry.targetVisibleFrame(
-            for: collapseVisibleFrame ?? frame,
-            visibleFrames: NSScreen.screens.map(\.visibleFrame),
-            cursor: NSEvent.mouseLocation
-        )
+        visibleFrame(for: collapseVisibleFrame ?? frame)
     }
 
     private func nearestEdge(in visible: NSRect) -> ShelfEdge {
@@ -1566,6 +1584,14 @@ final class ShelfController {
     /// The panel grows downward from a fixed top edge, so items appearing never
     /// shift the header out from under the cursor that is dropping them.
     private func resize() {
+        // A promised file can arrive while the user has hold of this shelf.
+        // Resizing moves the window, which the move observer cannot tell from a
+        // drag, so it would record a display the user never moved the shelf to.
+        // The button being down is enough; it need not have become a drag yet.
+        if isUserMoving || userMoveCandidate {
+            resizeAfterMove = true
+            return
+        }
         guard let panel else { return }
         let height = desiredHeight()
         var frame = panel.frame
@@ -1622,20 +1648,18 @@ final class ShelfController {
     private func position(near point: NSPoint?) {
         guard let panel else { return }
         let size = panel.frame.size
-        let cursor = point ?? NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(cursor) } ?? NSScreen.main
-        guard let screen else { return }
-        let visible = screen.visibleFrame
+        let cursor = point ?? displayTarget.placementPoint
+        guard let visible = visibleFrame(for: panel.frame) else { return }
 
         // A shake is a request for the shelf to appear under the hand that
         // shook, so it lands there untouched; everything else goes where the
         // preference says, clear of the shelves already out.
         let frame = point == nil
             ? defaultPlacement(size: size, in: visible)
-            : clampedToScreen(NSRect(
+            : ShelfWindowGeometry.clamped(NSRect(
                 origin: NSPoint(x: cursor.x - size.width / 2, y: cursor.y - size.height / 2),
                 size: size
-            ))
+            ), to: visible)
         panel.setFrame(frame, display: false)
     }
 
@@ -1645,7 +1669,7 @@ final class ShelfController {
         let origin: NSPoint
         switch AppState.shared.shelfLocation {
         case .cursor:
-            let cursor = NSEvent.mouseLocation
+            let cursor = displayTarget.placementPoint
             origin = NSPoint(x: cursor.x - size.width / 2, y: cursor.y - size.height / 2)
         case .topLeft:
             origin = NSPoint(x: visible.minX + 20, y: visible.maxY - size.height - 20)
@@ -1659,7 +1683,7 @@ final class ShelfController {
             origin = NSPoint(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2)
         }
         return ShelfWindowGeometry.avoidingOverlap(
-            clampedToScreen(NSRect(origin: origin, size: size)),
+            NSRect(origin: origin, size: size),
             in: visible,
             occupiedFrames: ShelfManager.shared.shelves
                 .filter { $0 !== self }
@@ -1673,9 +1697,9 @@ final class ShelfController {
     }
 
     private func visibleFrame(for frame: NSRect) -> NSRect? {
-        ShelfWindowGeometry.targetVisibleFrame(
+        displayTarget.resolve(
             for: frame,
-            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            displays: ShelfDisplay.connected,
             cursor: NSEvent.mouseLocation
         )
     }

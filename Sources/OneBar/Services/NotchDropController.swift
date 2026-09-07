@@ -125,11 +125,16 @@ final class NotchDropController {
     }
 
     fileprivate func receiveExternal(from sender: NSDraggingInfo) -> Bool {
+        let displayTarget = ShelfDisplayTarget.capture(
+            at: window?.convertPoint(toScreen: sender.draggingLocation)
+        )
         var targetShelf: ShelfController?
         ShelfItemReader.read(from: sender) { items in
             guard !items.isEmpty else { return }
             if targetShelf == nil {
-                targetShelf = ShelfManager.shared.newShelf(at: nil, focus: .afterFirstDrop)
+                targetShelf = ShelfManager.shared.newShelf(
+                    at: nil, displayTarget: displayTarget, focus: .afterFirstDrop
+                )
             }
             guard let targetShelf, targetShelf.isActive else {
                 ShelfStore.shared.discard(items)
@@ -145,8 +150,13 @@ final class NotchDropController {
         from source: ShelfDragSourceView,
         operation: ShelfTransferOperation
     ) -> Bool {
+        let displayTarget = ShelfDisplayTarget.capture(at: window.map {
+            NSPoint(x: $0.frame.midX, y: $0.frame.midY)
+        })
         guard let sourceController = source.controller,
-              let targetShelf = ShelfManager.shared.newShelf(at: nil, focus: .afterFirstDrop)
+              let targetShelf = ShelfManager.shared.newShelf(
+                  at: nil, displayTarget: displayTarget, focus: .afterFirstDrop
+              )
         else { return false }
 
         let transferred = ShelfManager.shared.transfer(
